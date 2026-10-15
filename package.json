@@ -6,12 +6,17 @@
   "bin": {
     "swiftssh": "bin/swiftssh.js"
   },
-  "files": ["bin", "src"],
+  "files": [
+    "bin",
+    "src"
+  ],
   "engines": {
     "node": ">=18.17"
   },
   "scripts": {
-    "test": "node test/e2e.js"
+    "test": "node test/e2e.js",
+    "app": "npm --prefix app start",
+    "app:dist": "npm --prefix app run dist"
   },
   "dependencies": {
     "selfsigned": "^2.4.1",

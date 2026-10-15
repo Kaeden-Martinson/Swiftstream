@@ -45,7 +45,7 @@ const server = spawn(process.execPath, [cli, 'serve', '--port', port, '--host', 
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((resolve, reject) => {
-  server.stdout.on('data', (d) => d.toString().includes('SWIFTSSH_READY') && resolve());
+  server.stdout.on('data', (d) => d.toString().includes('running on port') && resolve());
   server.on('exit', (code) => reject(new Error(`server exited ${code}`)));
 });
 
@@ -131,7 +131,7 @@ try {
   fs.copyFileSync(path.join(clientHome, 'hosts.json'), path.join(strangerHome, 'hosts.json'));
   const denied = run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');
   assert.notEqual(denied.code, 0);
-  assert.match(denied.err, /key not authorized/);
+  assert.match(denied.err, /isn't authorized/);
   console.log('ok  unauthorized key rejected');
 
   // A pinned fingerprint that doesn't match must refuse to connect.

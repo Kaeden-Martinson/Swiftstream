@@ -233,6 +233,33 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       return { written: entries.length };
     },
 
+    // One directory level, for file browsers.
+    'GET /v1/ls': async (req, url) => {
+      authenticate(req);
+      const dir = resolvePath(url.searchParams.get('path') || '.'); // default: the server's root, where shells start
+      const ents = await fsp.readdir(dir, { withFileTypes: true }).catch((err) => {
+        throw new HttpError(err.code === 'ENOENT' ? 404 : 400, `can't open folder: ${dir}`);
+      });
+      const entries = [];
+      for (const ent of ents) {
+        if (ent.name.endsWith('.swiftssh-part')) continue;
+        const st = await fsp.stat(path.join(dir, ent.name)).catch(() => null);
+        if (!st) continue; // broken symlink or vanished file
+        entries.push({ name: ent.name, isDirectory: st.isDirectory(), size: st.size, mtime: st.mtimeMs });
+      }
+      entries.sort((a, b) => b.isDirectory - a.isDirectory || a.name.localeCompare(b.name));
+      const parent = path.dirname(dir);
+      return { path: dir, parent: parent === dir ? null : parent, home: os.homedir(), entries };
+    },
+
+    'POST /v1/mkdir': async (req) => {
+      authenticate(req);
+      const { path: p } = await readJsonBody(req);
+      const dir = resolvePath(p);
+      await fsp.mkdir(dir, { recursive: true });
+      return { path: dir };
+    },
+
     'GET /v1/list': async (req, url) => {
       authenticate(req);
       const base = resolvePath(url.searchParams.get('path'));

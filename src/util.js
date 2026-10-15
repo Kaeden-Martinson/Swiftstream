@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { UserError } from './errors.js';
 
 /**
  * Join a relative path from the other side onto a local root, refusing anything that
@@ -67,21 +68,32 @@ export function formatBytes(n) {
 
 export function parseSize(text) {
   const m = /^(\d+(?:\.\d+)?)\s*([kmg]?)b?$/i.exec(String(text).trim());
-  if (!m) throw new Error(`Invalid size: ${text}`);
+  if (!m) throw new UserError(`"${text}" isn't a size.`, 'Use a number with an optional unit, like 512KB, 4MB or 1GB.');
   return Math.round(Number(m[1]) * 1024 ** ' kmg'.indexOf(m[2].toLowerCase() || ' '));
 }
 
-/** Single-line progress meter on stderr; silent when stderr isn't a terminal. */
+export function formatDuration(secs) {
+  if (secs < 60) return `${secs < 10 ? secs.toFixed(1) : Math.round(secs)}s`;
+  const m = Math.floor(secs / 60);
+  return m < 60 ? `${m}m ${Math.round(secs % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** Single-line progress bar on stderr; silent when stderr isn't a terminal. */
 export function progressMeter(label, total) {
   const started = Date.now();
   let done = 0;
   const render = (final = false) => {
-    if (!process.stderr.isTTY && !final) return;
+    if (!process.stderr.isTTY) return;
     const secs = Math.max((Date.now() - started) / 1000, 0.001);
     const rate = done / secs;
-    const pct = total ? Math.floor((done / total) * 100) : 100;
-    const eta = rate > 0 && !final ? ` ETA ${Math.ceil((total - done) / rate)}s` : ` in ${secs.toFixed(1)}s`;
-    process.stderr.write(`\r${label}  ${pct}%  ${formatBytes(done)}/${formatBytes(total)}  ${formatBytes(rate)}/s${eta}\x1b[K`);
+    const frac = total ? Math.min(done / total, 1) : 1;
+    const width = Math.max(10, Math.min(30, (process.stderr.columns || 80) - label.length - 55));
+    const filled = Math.round(frac * width);
+    const bar = '█'.repeat(filled) + '░'.repeat(width - filled);
+    const tail = final
+      ? `${formatBytes(total)} in ${formatDuration(secs)} (${formatBytes(total / secs)}/s)`
+      : `${formatBytes(done)} / ${formatBytes(total)}  ${formatBytes(rate)}/s  ${rate > 0 ? `${formatDuration((total - done) / rate)} left` : ''}`;
+    process.stderr.write(`\r${label} ${bar} ${String(Math.floor(frac * 100)).padStart(3)}%  ${tail}\x1b[K`);
     if (final) process.stderr.write('\n');
   };
   const timer = setInterval(render, 200);

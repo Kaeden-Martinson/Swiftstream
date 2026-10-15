@@ -1,3 +1,5 @@
 node_modules/
 *.swiftssh-part
 .test-home/
+app/core/
+app/dist/

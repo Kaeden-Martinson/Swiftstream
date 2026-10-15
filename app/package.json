@@ -1,0 +1,77 @@
+{
+  "name": "swiftssh-desktop",
+  "productName": "SwiftSSH",
+  "version": "0.1.0",
+  "description": "Desktop app for swiftssh: fast remote shell and file transfer over HTTPS",
+  "type": "module",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "sync-core": "node scripts/sync-core.js",
+    "start": "npm run sync-core && electron .",
+    "dist": "npm run sync-core && electron-builder --win --publish never",
+    "icon": "electron scripts/make-icon.js"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "selfsigned": "^2.4.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3"
+  },
+  "author": "SwiftSSH",
+  "build": {
+    "appId": "dev.swiftssh.desktop",
+    "productName": "SwiftSSH",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "renderer/**",
+      "core/**",
+      "build/icon.png",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SwiftSSH",
+      "artifactName": "SwiftSSH-Setup-${version}.exe"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png"
+    }
+  }
+}

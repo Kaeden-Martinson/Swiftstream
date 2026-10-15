@@ -3,17 +3,37 @@
 Remote shell and fast, resumable file transfer over HTTPS with SSH-style key auth.
 Use your normal `ssh` login once to start swiftssh on a host. After that, connect through swiftssh.
 
+There are two ways to use it: the **desktop app** (terminal and file browser) or the **`swiftssh` command**. Both use the same saved servers and key, in `~/.swiftssh`.
+
+## Desktop app
+
+Download `SwiftSSH-Setup-<version>.exe` and run it. Choose **Add a server**, enter the SSH login you already use (like `ubuntu@203.0.113.7`), and the app sets the server up. After that:
+
+- **Terminal tab:** a full terminal on the server. Copy with Ctrl+Shift+C.
+- **Files tab:** browse folders, drag files or folders in to upload, select items and press Download. Transfers show their progress at the bottom right and resume if interrupted.
+- **Error messages** say what went wrong and what to do. If the server stopped, a **Start server again** button restarts it over SSH.
+
+The app logs in with your SSH **key**, since it can't type passwords. If you normally use a password, run `ssh-copy-id user@host` once, or use `swiftssh setup` in a terminal.
+
+To build it yourself, see [Development](#development).
+
+## Command line
+
 ```bash
 npm i -g swiftssh
 
-swiftssh deploy prod me@prod.example.com   # one-time: ssh in, start swiftssh, authorize your key, pin its cert
+swiftssh setup                             # guided: connect your first server
+swiftssh deploy prod me@prod.example.com   # same thing in one line: ssh in, start swiftssh, authorize your key, pin its cert
 swiftssh connect prod                      # interactive shell
 swiftssh push prod ./build.tar.gz /srv/    # parallel, resumable, checksummed upload
 swiftssh pull prod /var/log/app.log .
 swiftssh push prod ./site /var/www/        # folders: only changed files are sent
 swiftssh bench prod                        # measure scp/sftp vs swiftssh on this host
 swiftssh exec prod -- systemctl restart app
+swiftssh hosts                             # list saved servers;  swiftssh remove <name> to forget one
 ```
+
+Run `swiftssh` on its own for the list of commands, and `swiftssh <command> --help` for details on one. Errors explain the fix, for example the exact `swiftssh authorize` line to run when a server doesn't know your key yet. Typos get a "did you mean" suggestion.
 
 ## Why HTTPS instead of SCP/SFTP
 
@@ -56,6 +76,7 @@ The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per
 | `POST /v1/sync/plan` | Send a folder manifest (`path, size, mtime`), get back which files the server needs |
 | `PUT /v1/bundle?root` / `POST /v1/bundle/read` | Many small files in one body: repeated `[u32 header length][header JSON with path, mtime, sha256][bytes]`, then a zero length |
 | `GET /v1/list?path` | Recursive listing used by folder pulls |
+| `GET /v1/ls?path`, `POST /v1/mkdir` | One folder level and folder creation, for the app's file browser |
 | `WSS /v1/shell?cmd&pty&cols&rows` | Shell or exec. Binary frames start with a stream id byte (0 stdin / 1 stdout / 2 stderr). Text frames are JSON control messages (`hello`, `resize`, `eof`, `exit`). |
 
 The server uses a real PTY when `node-pty` is installed (an optional dependency) and falls back to plain pipes otherwise.
@@ -67,6 +88,16 @@ npm install
 npm test            # end-to-end: real server + client on localhost
 ```
 
+The desktop app lives in `app/`. It's an Electron app that runs the same `src/` client code, copied into `app/core` by `npm run sync-core`.
+
+```bash
+npm --prefix app install
+npm run app         # run the app from source
+npm run app:dist    # build app/dist/SwiftSSH-Setup-<version>.exe
+```
+
+The installer isn't code-signed yet, so Windows SmartScreen will warn the first time it runs. Choose "More info", then "Run anyway".
+
 Run the server and client on one machine by giving each its own `SWIFTSSH_HOME`:
 
 ```bash
@@ -74,7 +105,7 @@ SWIFTSSH_HOME=/tmp/srv node bin/swiftssh.js serve --port 7022
 ```
 
 ```bash
-SWIFTSSH_HOME=/tmp/srv node bin/swiftssh.js authorize "$(node bin/swiftssh.js keygen)"
+SWIFTSSH_HOME=/tmp/srv node bin/swiftssh.js authorize "$(node bin/swiftssh.js key)"
 ```
 
 ```bash
@@ -89,6 +120,7 @@ Until the package is published to npm, test `deploy` against a host where you've
 1. **Publish to npm** so that `deploy`'s default `npx -y swiftssh` works on any host that has Node.
 2. **Delta transfer** for large files that changed slightly (rsync-style rolling checksums), and an optional `--delete` for folder sync.
 3. **HTTP/3 / QUIC transport** for lossy links, keeping HTTPS/1.1 as the fallback.
-4. **Accounts and a desktop app** (Termius-style): a hosted account that syncs your host list and public keys between devices, with an Electron or Tauri UI built on the same client library. The private key stays on each device.
-5. **Hardening**: rate-limit auth, per-key permissions such as a root dir or read-only access, audit log, and systemd/launchd service install.
-6. **Port forwarding** over the same WebSocket channel.
+4. **Accounts** (Termius-style): a hosted account that syncs your host list and public keys between devices. The private key stays on each device.
+5. **Desktop app polish**: multiple terminal tabs per server, delete/rename in the file browser, auto-update, and signed builds for Windows and macOS.
+6. **Hardening**: rate-limit auth, per-key permissions such as a root dir or read-only access, audit log, and systemd/launchd service install.
+7. **Port forwarding** over the same WebSocket channel.

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>SwiftSSH</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l5 5-5 5M11 17h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>SwiftSSH</span>
+      </div>
+      <div class="sidebar-label">Servers</div>
+      <ul id="host-list" class="host-list"></ul>
+      <button id="add-host" class="btn btn-quiet add-host">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Add server
+      </button>
+      <div class="sidebar-foot">
+        <button id="show-key" class="btn btn-quiet">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 12l9-9M17 6l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Your key
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section id="empty" class="empty">
+        <div class="empty-inner">
+          <h1>Connect your first server</h1>
+          <p>SwiftSSH gives you a terminal and fast file transfers to your servers. Uploads and downloads go over HTTPS on several connections at once, and unchanged files are skipped.</p>
+          <button id="empty-add" class="btn btn-primary">Add a server</button>
+          <ol class="how">
+            <li><span><b>Log in with SSH once.</b> SwiftSSH starts itself on the server and remembers it.</span></li>
+            <li><span><b>Open a terminal or browse files.</b> Drag files in to upload them.</span></li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="host-view" class="host-view" hidden>
+        <header class="host-head">
+          <div class="host-title">
+            <h1 id="host-name"></h1>
+            <div id="host-sub" class="muted"></div>
+          </div>
+          <nav class="tabs" role="tablist">
+            <button class="tab" data-tab="terminal" role="tab">Terminal</button>
+            <button class="tab" data-tab="files" role="tab">Files</button>
+          </nav>
+          <button id="remove-host" class="btn btn-quiet btn-small" title="Remove this server from SwiftSSH">Remove</button>
+        </header>
+
+        <div id="banner" class="banner" hidden>
+          <div>
+            <div id="banner-message" class="banner-message"></div>
+            <div id="banner-hint" class="banner-hint"></div>
+          </div>
+          <div class="banner-actions">
+            <button id="banner-action" class="btn btn-primary btn-small" hidden></button>
+            <button id="banner-retry" class="btn btn-small">Try again</button>
+          </div>
+        </div>
+
+        <div id="terminal-pane" class="pane terminal-pane"></div>
+
+        <div id="files-pane" class="pane files-pane" hidden>
+          <div class="toolbar">
+            <button id="files-up" class="icon-btn" title="Up one folder">
+              <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button id="files-home" class="icon-btn" title="Home folder">
+              <svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </button>
+            <div id="crumbs" class="crumbs"></div>
+            <button id="files-refresh" class="icon-btn" title="Refresh">
+              <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span class="toolbar-gap"></span>
+            <button id="files-mkdir" class="btn btn-small">New folder</button>
+            <button id="files-upload" class="btn btn-small">Upload files</button>
+            <button id="files-upload-dir" class="btn btn-small">Upload folder</button>
+            <button id="files-download" class="btn btn-primary btn-small" disabled>Download</button>
+          </div>
+          <div id="file-area" class="file-area">
+            <table class="file-table">
+              <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th></tr></thead>
+              <tbody id="file-rows"></tbody>
+            </table>
+            <div id="files-empty" class="files-empty" hidden>This folder is empty. Drop files here to upload them.</div>
+            <div id="drop-overlay" class="drop-overlay" hidden><div>Drop to upload to <b id="drop-target"></b></div></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="transfers" class="transfers" aria-live="polite"></div>
+
+  <dialog id="add-dialog" class="dialog">
+    <form method="dialog" class="dialog-body" id="add-form" novalidate>
+      <h2>Add a server</h2>
+      <div class="segmented" role="radiogroup">
+        <label><input type="radio" name="mode" value="ssh" checked><span>I can log in with SSH</span></label>
+        <label><input type="radio" name="mode" value="direct"><span>SwiftSSH is already running</span></label>
+      </div>
+
+      <div data-mode="ssh">
+        <p class="muted">SwiftSSH logs in with your SSH key once, starts itself on the server, and remembers it. The server needs Node.js 18 or newer.</p>
+        <label class="field"><span>SSH login</span><input name="target" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
+        <div class="field-row">
+          <label class="field"><span>Name</span><input name="name" placeholder="prod" autocomplete="off" spellcheck="false"></label>
+          <label class="field narrow"><span>SSH port</span><input name="sshPort" placeholder="22" inputmode="numeric"></label>
+        </div>
+      </div>
+
+      <div data-mode="direct" hidden>
+        <p class="muted">Use this if you ran <code>swiftssh serve</code> on the server yourself.</p>
+        <label class="field"><span>Address</span><input name="address" placeholder="192.168.1.20 or box.example.com:7022" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Name</span><input name="directName" placeholder="home-server" autocomplete="off" spellcheck="false"></label>
+      </div>
+
+      <div id="add-trust" class="trust" hidden>
+        <p>The server's fingerprint is:</p>
+        <code id="add-fingerprint" class="fingerprint"></code>
+        <p class="muted">Check that it matches the fingerprint <code>swiftssh serve</code> printed on the server. If it doesn't, someone may be intercepting the connection.</p>
+      </div>
+
+      <div id="add-authorize" class="trust" hidden>
+        <p><b>One more step.</b> Allow this computer by running this on the server:</p>
+        <div class="copy-box"><code id="add-authorize-cmd"></code><button type="button" class="btn btn-small" data-copy="add-authorize-cmd">Copy</button></div>
+      </div>
+
+      <div id="add-error" class="form-error" hidden></div>
+      <div id="add-progress" class="form-progress" hidden><span class="spinner"></span><span id="add-progress-text"></span></div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="add-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="add-submit">Set up server</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="key-dialog" class="dialog">
+    <form method="dialog" class="dialog-body">
+      <h2>Your key</h2>
+      <p class="muted">This computer's public key. Servers allow you in by adding it with <code>swiftssh authorize</code>. SwiftSSH does this for you when you set a server up over SSH.</p>
+      <div class="copy-box"><code id="key-text" class="wrap"></code><button type="button" class="btn btn-small" data-copy="key-text">Copy</button></div>
+      <p class="muted small">Fingerprint <span id="key-fingerprint"></span></p>
+      <div class="dialog-actions"><button class="btn btn-primary">Done</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="prompt-dialog" class="dialog">
+    <form method="dialog" class="dialog-body" id="prompt-form">
+      <h2 id="prompt-title"></h2>
+      <p id="prompt-text" class="muted"></p>
+      <label class="field" id="prompt-field"><input id="prompt-input" autocomplete="off" spellcheck="false"></label>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="prompt-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="prompt-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

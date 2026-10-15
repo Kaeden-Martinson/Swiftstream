@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 import readline from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,8 @@ import { DEFAULT_PORT, ensureDir, getHost, loadHosts, paths, saveHost, writeJson
 import { authorizeKey, keyFingerprint, loadOrCreateIdentity } from '../src/keys.js';
 import { fetchServerCert, loadOrCreateServerCert } from '../src/tls.js';
 import { connectClient } from '../src/client.js';
-import { push, pull } from '../src/transfer.js';
+import { pull, pullDir, push, pushDir, remoteBasename } from '../src/transfer.js';
+import { bench, formatBench } from '../src/bench.js';
 import { openShell } from '../src/shell.js';
 import { deployOverSsh, readyLine } from '../src/deploy.js';
 import { formatBytes, parseSize } from '../src/util.js';
@@ -24,8 +26,9 @@ Your machine (client):
   swiftssh hosts                           list saved hosts
   swiftssh connect <name>                  interactive shell
   swiftssh exec <name> -- <command...>     run one command
-  swiftssh push <name> <local> [remote]    upload a file   [--parallel 8] [--chunk 4MB]
-  swiftssh pull <name> <remote> [local]    download a file [--parallel 8] [--chunk 4MB]
+  swiftssh push <name> <local> [remote]    upload a file or folder   [--parallel 8] [--chunk 4MB]
+  swiftssh pull <name> <remote> [local]    download a file or folder (folders only send changed files)
+  swiftssh bench <name>                    time scp/sftp vs swiftssh on this host [--size 200MB] [--files 2000]
 
 The host (server):
   swiftssh serve [--port ${DEFAULT_PORT}] [--host 0.0.0.0] [--root ~] [--daemon]
@@ -42,6 +45,8 @@ const OPTIONS = {
   'ssh-port': { type: 'string' },
   'remote-cmd': { type: 'string' },
   authorize: { type: 'string' },
+  size: { type: 'string' },
+  files: { type: 'string' },
   daemon: { type: 'boolean' },
   yes: { type: 'boolean', short: 'y' },
   help: { type: 'boolean', short: 'h' },
@@ -147,7 +152,7 @@ const COMMANDS = {
       publicKey: id.publicKeyString,
     });
     const hostname = target.includes('@') ? target.split('@')[1] : target;
-    saveHost(name, { url: `https://${hostname}:${ready.port}`, fingerprint: ready.fingerprint, cert: ready.cert, ssh: target });
+    saveHost(name, { url: `https://${hostname}:${ready.port}`, fingerprint: ready.fingerprint, cert: ready.cert, ssh: target, sshPort: opts['ssh-port'] });
     const c = await client(name);
     const info = await c.request('GET', '/v1/info');
     c.close();
@@ -182,8 +187,14 @@ const COMMANDS = {
     const [name, local, remote = '~/'] = args;
     const c = await client(name, opts);
     try {
-      const r = await push(c, local, remote, transferOpts(opts));
-      console.log(`${r.path}  ${formatBytes(r.size)}  sha256 ${r.sha256.slice(0, 16)}…`);
+      if (fs.statSync(local).isDirectory()) {
+        // Like scp -r: "dest/" means "inside dest", otherwise dest is the folder itself.
+        const target = /[\\/]$/.test(remote) ? remote + path.basename(path.resolve(local)) : remote;
+        printSync(await pushDir(c, local, target, transferOpts(opts)));
+      } else {
+        const r = await push(c, local, remote, transferOpts(opts));
+        console.log(`${r.path}  ${formatBytes(r.size)}  sha256 ${r.sha256.slice(0, 16)}…`);
+      }
     } finally {
       c.close();
     }
@@ -194,13 +205,41 @@ const COMMANDS = {
     const [name, remote, local = '.'] = args;
     const c = await client(name, opts);
     try {
-      const r = await pull(c, remote, local, transferOpts(opts));
-      console.log(`${r.path}  ${formatBytes(r.size)}  sha256 ${r.sha256.slice(0, 16)}…`);
+      const info = await c.request('GET', '/v1/stat', { query: { path: remote } });
+      if (info.isDirectory) {
+        // Same rule as push, so rerunning a command always syncs the same folder.
+        const target = /[\\/]$/.test(local) || local === '.' ? path.join(local, remoteBasename(info.path)) : local;
+        printSync(await pullDir(c, info.path, target, transferOpts(opts)));
+      } else {
+        const r = await pull(c, remote, local, transferOpts(opts));
+        console.log(`${r.path}  ${formatBytes(r.size)}  sha256 ${r.sha256.slice(0, 16)}…`);
+      }
+    } finally {
+      c.close();
+    }
+  },
+
+  async bench(args, opts) {
+    need(args, 1, 'bench <name> [--size 200MB] [--files 2000]');
+    const host = getHost(args[0]);
+    const c = await client(args[0], opts);
+    try {
+      const rows = await bench(c, host, {
+        size: opts.size ? parseSize(opts.size) : 200 * 1024 * 1024,
+        files: Number(opts.files) || 2000,
+        ...transferOpts(opts),
+      });
+      console.log(formatBench(rows));
     } finally {
       c.close();
     }
   },
 };
+
+function printSync(r) {
+  const unchanged = r.files - r.sent;
+  console.log(`${r.root}  ${r.sent} sent (${formatBytes(r.bytes)}), ${unchanged} unchanged`);
+}
 
 /** Start the server in the background (surviving the ssh session that launched it) and print its ready line. */
 async function daemonize(port, opts) {

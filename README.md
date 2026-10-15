@@ -10,6 +10,8 @@ swiftssh deploy prod me@prod.example.com   # one-time: ssh in, start swiftssh, a
 swiftssh connect prod                      # interactive shell
 swiftssh push prod ./build.tar.gz /srv/    # parallel, resumable, checksummed upload
 swiftssh pull prod /var/log/app.log .
+swiftssh push prod ./site /var/www/        # folders: only changed files are sent
+swiftssh bench prod                        # measure scp/sftp vs swiftssh on this host
 swiftssh exec prod -- systemctl restart app
 ```
 
@@ -21,8 +23,14 @@ SSH and HTTPS both run over TCP, so moving to HTTPS alone doesn't help with pack
 |---|---|
 | One TCP stream per transfer. A lost packet halves the throughput of the whole transfer. | Files are split into chunks and sent over **N parallel TLS connections** (`--parallel`, default 8). A lost packet slows only one of them. |
 | SSH's own channel flow-control window caps throughput on high-latency links (the reason HPN-SSH exists). | Plain HTTPS, so throughput is limited only by TCP. |
+| Many small files are slow: SFTP waits for a round trip on every open, write and close. | Small files are **packed into bundles** of up to 8 MB / 1000 files, sent in parallel. 10,000 files take a few dozen requests. |
+| `scp -r` re-sends everything. | Folder transfers compare size and modification time (like rsync's quick check) and **send only what changed**. Timestamps are preserved so the next run can tell. |
 | A dropped connection means starting over. | The server records which chunks it has received. Rerunning the same `push` **resumes**. |
 | Integrity is left to TCP. | Every chunk carries a SHA-256, and the whole file is checked again before the atomic rename into place. |
+
+Every transfer goes through swiftssh's own HTTPS protocol. SSH is used exactly once, by `deploy`, to start the server.
+
+Run `swiftssh bench <host>` to measure the difference on your own link. It uploads the same 200 MB file and the same 2000 small files with `scp` (which uses the SFTP protocol on OpenSSH 9+) and with swiftssh, then prints both times side by side. Gains are largest on high-latency or lossy links and with many small files. On a fast LAN, a single large file may only be about as fast as scp.
 
 The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per stream and doesn't stall the whole connection. See the roadmap.
 
@@ -45,6 +53,9 @@ The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per
 | `PUT /v1/upload/chunk?id&index` | Raw chunk body, checked against the `x-chunk-sha256` header |
 | `POST /v1/upload/complete?id` | Verify the whole-file hash, then atomically rename into place |
 | `GET /v1/stat?path&hash=1`, `GET /v1/file?path` (Range) | Downloads via parallel range requests |
+| `POST /v1/sync/plan` | Send a folder manifest (`path, size, mtime`), get back which files the server needs |
+| `PUT /v1/bundle?root` / `POST /v1/bundle/read` | Many small files in one body: repeated `[u32 header length][header JSON with path, mtime, sha256][bytes]`, then a zero length |
+| `GET /v1/list?path` | Recursive listing used by folder pulls |
 | `WSS /v1/shell?cmd&pty&cols&rows` | Shell or exec. Binary frames start with a stream id byte (0 stdin / 1 stdout / 2 stderr). Text frames are JSON control messages (`hello`, `resize`, `eof`, `exit`). |
 
 The server uses a real PTY when `node-pty` is installed (an optional dependency) and falls back to plain pipes otherwise.
@@ -76,7 +87,7 @@ Until the package is published to npm, test `deploy` against a host where you've
 ## Roadmap
 
 1. **Publish to npm** so that `deploy`'s default `npx -y swiftssh` works on any host that has Node.
-2. **Directory sync**: `push -r` with a manifest diff, so only changed files are sent (rsync-style).
+2. **Delta transfer** for large files that changed slightly (rsync-style rolling checksums), and an optional `--delete` for folder sync.
 3. **HTTP/3 / QUIC transport** for lossy links, keeping HTTPS/1.1 as the fallback.
 4. **Accounts and a desktop app** (Termius-style): a hosted account that syncs your host list and public keys between devices, with an Electron or Tauri UI built on the same client library. The private key stays on each device.
 5. **Hardening**: rate-limit auth, per-key permissions such as a root dir or read-only access, audit log, and systemd/launchd service install.

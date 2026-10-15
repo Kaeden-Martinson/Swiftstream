@@ -9,11 +9,14 @@ import { WebSocketServer } from 'ws';
 import { ensureDir, paths, readJson, writeJson } from './config.js';
 import { authMessage, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, verify } from './keys.js';
 import { loadOrCreateServerCert } from './tls.js';
-import { hashFile } from './util.js';
+import { decodeBundle, encodeBundle } from './bundle.js';
+import { hashFile, safeJoin, sameMtime, walk, writeFileAtomic } from './util.js';
 
 const CHALLENGE_TTL_MS = 60_000;
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 const MAX_CHUNK_SIZE = 64 * 1024 * 1024;
+const MAX_BUNDLE_SIZE = 64 * 1024 * 1024;
+const MAX_MANIFEST_SIZE = 32 * 1024 * 1024;
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 class HttpError extends Error {
@@ -48,6 +51,14 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     if (typeof p !== 'string' || !p) throw new HttpError(400, 'path is required');
     if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
     return path.resolve(root, p);
+  };
+
+  const safePath = (base, rel) => {
+    try {
+      return safeJoin(base, rel);
+    } catch (err) {
+      throw new HttpError(400, err.message);
+    }
   };
 
   const authenticate = (req) => {
@@ -138,7 +149,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
         const fh = await fsp.open(partPath, 'w');
         await fh.truncate(size);
         await fh.close();
-        state = { dest, partPath, size, chunkSize, sha256: body.sha256, received: [] };
+        state = { dest, partPath, size, chunkSize, sha256: body.sha256, mtime: Number(body.mtime) || null, received: [] };
         writeJson(statePath, state);
       }
       state.received = new Set(state.received);
@@ -161,6 +172,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
         throw new HttpError(422, 'checksum mismatch; upload discarded');
       }
       await fsp.rename(state.partPath, state.dest);
+      if (state.mtime) await fsp.utimes(state.dest, new Date(), state.mtime / 1000);
       await fsp.rm(path.join(paths.uploads, `${id}.json`), { force: true });
       uploads.delete(id);
       log('upload complete', state.dest, state.size);
@@ -189,6 +201,65 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       state.received.add(index);
       persistUpload(id, state);
       return { ok: true };
+    },
+
+    // Folder sync: the client sends its manifest, we answer with the files we don't already have.
+    'POST /v1/sync/plan': async (req) => {
+      authenticate(req);
+      const { root: rootPath, files } = await readJsonBody(req, MAX_MANIFEST_SIZE);
+      if (!Array.isArray(files)) throw new HttpError(400, 'files must be an array');
+      const base = resolvePath(rootPath);
+      const need = [];
+      for (const f of files) {
+        const st = await fsp.stat(safePath(base, f.path)).catch(() => null);
+        if (!st?.isFile() || st.size !== f.size || !sameMtime(st.mtimeMs, f.mtime)) need.push(f.path);
+      }
+      return { root: base, need };
+    },
+
+    'PUT /v1/bundle': async (req, url) => {
+      authenticate(req);
+      const base = resolvePath(url.searchParams.get('root'));
+      let entries;
+      try {
+        entries = decodeBundle(await readBody(req, MAX_BUNDLE_SIZE));
+      } catch (err) {
+        throw err instanceof HttpError ? err : new HttpError(422, err.message);
+      }
+      const targets = entries.map((e) => safePath(base, e.header.path)); // validate all before writing any
+      for (let i = 0; i < entries.length; i++) {
+        await writeFileAtomic(targets[i], entries[i].data, entries[i].header.mtime);
+      }
+      return { written: entries.length };
+    },
+
+    'GET /v1/list': async (req, url) => {
+      authenticate(req);
+      const base = resolvePath(url.searchParams.get('path'));
+      const st = await fsp.stat(base).catch(() => null);
+      if (!st?.isDirectory()) throw new HttpError(400, `not a directory: ${base}`);
+      return { root: base, files: await walk(base) };
+    },
+
+    'POST /v1/bundle/read': async (req, url, res) => {
+      authenticate(req);
+      const { root: rootPath, paths: wanted } = await readJsonBody(req, MAX_MANIFEST_SIZE);
+      if (!Array.isArray(wanted)) throw new HttpError(400, 'paths must be an array');
+      const base = resolvePath(rootPath);
+      const entries = [];
+      let total = 0;
+      for (const rel of wanted) {
+        const file = safePath(base, rel);
+        const st = await fsp.stat(file).catch(() => null);
+        if (!st?.isFile()) throw new HttpError(404, `no such file: ${rel}`);
+        total += st.size;
+        if (total > MAX_BUNDLE_SIZE) throw new HttpError(413, 'bundle too large');
+        entries.push({ header: { path: rel, mtime: st.mtimeMs }, data: await fsp.readFile(file) });
+      }
+      const body = encodeBundle(entries);
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': body.length });
+      res.end(body);
+      return undefined; // response handled
     },
 
     'GET /v1/file': async (req, url, res) => {
@@ -338,8 +409,8 @@ function readBody(req, limit) {
   });
 }
 
-async function readJsonBody(req) {
-  const body = await readBody(req, 64 * 1024);
+async function readJsonBody(req, limit = 64 * 1024) {
+  const body = await readBody(req, limit);
   try {
     return JSON.parse(body.toString() || '{}');
   } catch {

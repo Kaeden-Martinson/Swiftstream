@@ -28,6 +28,17 @@ const ok = (home, ...args) => {
   return r.out;
 };
 const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const treeHashes = (dir) =>
+  Object.fromEntries(
+    fs
+      .readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => {
+        const full = path.join(e.parentPath, e.name);
+        return [path.relative(dir, full).split(path.sep).join('/'), sha(full)];
+      })
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
 
 const server = spawn(process.execPath, [cli, 'serve', '--port', port, '--host', '127.0.0.1', '--root', files], {
   env: { ...process.env, SWIFTSSH_HOME: serverHome },
@@ -64,6 +75,56 @@ try {
   ok(clientHome, 'push', 'local', empty, 'empty.txt');
   assert.equal(fs.statSync(path.join(files, 'empty.txt')).size, 0);
   console.log('ok  empty file');
+
+  // Folder sync: many small files (bundled) plus files above the 1MB bundling threshold (chunked).
+  const tree = path.join(work, 'site');
+  for (let i = 0; i < 600; i++) {
+    const file = path.join(tree, `dir${i % 7}`, `sub${i % 3}`, `file${i}.txt`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, crypto.randomBytes(100 + (i % 50) * 37));
+  }
+  fs.writeFileSync(path.join(tree, 'large-a.bin'), crypto.randomBytes(3 * 1024 * 1024 + 7));
+  fs.writeFileSync(path.join(tree, 'dir1', 'large-b.bin'), crypto.randomBytes(2 * 1024 * 1024));
+  fs.writeFileSync(path.join(tree, 'empty.txt'), '');
+
+  let out = ok(clientHome, 'push', 'local', tree, 'deploy/', '--chunk', '1MB');
+  assert.match(out, /603 sent/);
+  assert.deepEqual(treeHashes(path.join(files, 'deploy', 'site')), treeHashes(tree));
+  console.log('ok  push folder: 600 small files bundled + 2 large chunked');
+
+  out = ok(clientHome, 'push', 'local', tree, 'deploy/');
+  assert.match(out, /0 sent .*603 unchanged/);
+  fs.writeFileSync(path.join(tree, 'dir3', 'sub0', 'file3.txt'), 'changed');
+  out = ok(clientHome, 'push', 'local', tree, 'deploy/');
+  assert.match(out, /1 sent .*602 unchanged/);
+  assert.deepEqual(treeHashes(path.join(files, 'deploy', 'site')), treeHashes(tree));
+  console.log('ok  re-push sends only changed files');
+
+  const pulled = path.join(work, 'pulled');
+  ok(clientHome, 'pull', 'local', 'deploy/site', pulled, '--chunk', '1MB');
+  assert.deepEqual(treeHashes(pulled), treeHashes(tree));
+  out = ok(clientHome, 'pull', 'local', 'deploy/site', pulled);
+  assert.match(out, /0 sent/);
+  console.log('ok  pull folder, then re-pull is a no-op');
+
+  // Paths inside a bundle must not escape the target folder.
+  process.env.SWIFTSSH_HOME = clientHome;
+  const { connectClient } = await import('../src/client.js');
+  const { loadOrCreateIdentity } = await import('../src/keys.js');
+  const { getHost } = await import('../src/config.js');
+  const { encodeBundle } = await import('../src/bundle.js');
+  const api = await connectClient(getHost('local'), loadOrCreateIdentity());
+  for (const evil of ['../escaped.txt', 'a/../../escaped.txt', path.resolve(work, 'escaped.txt')]) {
+    const body = encodeBundle([{ header: { path: evil, mtime: Date.now() }, data: Buffer.from('pwned') }]);
+    await assert.rejects(
+      api.request('PUT', '/v1/bundle', { query: { root: 'deploy' }, body, headers: { 'content-type': 'application/octet-stream' } }),
+      (err) => err.status === 400,
+    );
+  }
+  await assert.rejects(api.request('POST', '/v1/bundle/read', { body: { root: 'deploy', paths: ['../uploads/big.bin'] } }), (err) => err.status === 400);
+  api.close();
+  assert.ok(!fs.existsSync(path.join(files, 'escaped.txt')) && !fs.existsSync(path.join(work, 'escaped.txt')));
+  console.log('ok  path traversal rejected');
 
   // A key the server never authorized must be rejected.
   ok(strangerHome, 'keygen');

@@ -17,6 +17,11 @@ const SESSION_TTL_MS = 12 * 60 * 60_000;
 const MAX_CHUNK_SIZE = 64 * 1024 * 1024;
 const MAX_BUNDLE_SIZE = 64 * 1024 * 1024;
 const MAX_MANIFEST_SIZE = 32 * 1024 * 1024;
+const AUTH_WINDOW_MS = 10 * 60_000;
+const AUTH_MAX_FAILURES = 10; // per IP per window, then 429 until the window passes
+const AUTH_MAX_CHALLENGES = 120; // per IP per window
+const MAX_PENDING_CHALLENGES = 10_000;
+const STALE_UPLOAD_MS = 7 * 24 * 60 * 60_000;
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 class HttpError extends Error {
@@ -46,6 +51,22 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   const challenges = new Map(); // nonce -> expiry
   const sessions = new Map(); // token -> { expires, key }
   const uploads = new Map(); // id -> upload state (mirrored to disk so uploads survive restarts)
+  const authAttempts = new Map(); // ip -> { windowStart, failures, challenges }
+
+  /** Brute-force protection: count challenges and failed logins per client IP. */
+  const authBudget = (req) => {
+    const ip = req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    let entry = authAttempts.get(ip);
+    if (!entry || now - entry.windowStart > AUTH_WINDOW_MS) {
+      entry = { windowStart: now, failures: 0, challenges: 0 };
+      authAttempts.set(ip, entry);
+    }
+    if (entry.failures >= AUTH_MAX_FAILURES || entry.challenges >= AUTH_MAX_CHALLENGES) {
+      throw new HttpError(429, 'too many login attempts; try again in a few minutes');
+    }
+    return { ip, entry };
+  };
 
   const resolvePath = (p) => {
     if (typeof p !== 'string' || !p) throw new HttpError(400, 'path is required');
@@ -84,23 +105,31 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     writeJson(path.join(paths.uploads, `${id}.json`), { ...state, received: [...state.received] });
 
   const routes = {
-    'POST /v1/auth/challenge': async () => {
+    'POST /v1/auth/challenge': async (req) => {
+      authBudget(req).entry.challenges++;
+      if (challenges.size >= MAX_PENDING_CHALLENGES) throw new HttpError(503, 'server busy; try again shortly');
       const nonce = crypto.randomBytes(32).toString('base64url');
       challenges.set(nonce, Date.now() + CHALLENGE_TTL_MS);
       return { nonce, fingerprint };
     },
 
     'POST /v1/auth/verify': async (req) => {
+      const { ip, entry } = authBudget(req);
+      const fail = (message) => {
+        entry.failures++;
+        log('auth failed', ip, message);
+        return new HttpError(401, message);
+      };
       const { publicKey, nonce, signature } = await readJsonBody(req);
       const expires = challenges.get(nonce);
       challenges.delete(nonce);
-      if (!expires || expires < Date.now()) throw new HttpError(401, 'challenge expired');
+      if (!expires || expires < Date.now()) throw fail('challenge expired');
       const wanted = normalizePublicKey(String(publicKey || ''));
       if (!readAuthorizedKeys().some((k) => normalizePublicKey(k) === wanted)) {
-        throw new HttpError(401, 'key not authorized');
+        throw fail('key not authorized');
       }
       if (!verify(decodePublicKey(wanted), authMessage(nonce, fingerprint), signature)) {
-        throw new HttpError(401, 'bad signature');
+        throw fail('bad signature');
       }
       const token = crypto.randomBytes(32).toString('base64url');
       sessions.set(token, { expires: Date.now() + SESSION_TTL_MS, key: wanted });
@@ -318,6 +347,10 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   const server = https.createServer({ key, cert }, async (req, res) => {
     const url = new URL(req.url, 'https://localhost');
     const route = routes[`${req.method} ${url.pathname}`];
+    // API responses are private and never meant to be rendered by a browser.
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('x-frame-options', 'DENY');
     try {
       if (!route) throw new HttpError(404, 'not found');
       const result = await route(req, url, res);
@@ -330,9 +363,11 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     }
   });
   server.keepAliveTimeout = 30_000;
+  server.headersTimeout = 30_000; // slow-loris protection
+  server.requestTimeout = 10 * 60_000; // generous: a 64 MB chunk over a slow link
 
   // Interactive shell / remote exec over WebSocket on the same port.
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'https://localhost');
     try {
@@ -345,18 +380,53 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     wss.handleUpgrade(req, socket, head, (ws) => runShell(ws, url, { root, pty }));
   });
 
-  // Expire stale challenges/sessions so memory doesn't grow forever.
-  setInterval(() => {
+  // Expire stale challenges/sessions/rate-limit windows so memory doesn't grow forever.
+  const sweeper = setInterval(() => {
     const now = Date.now();
     for (const [k, exp] of challenges) if (exp < now) challenges.delete(k);
     for (const [k, s] of sessions) if (s.expires < now) sessions.delete(k);
-  }, 60_000).unref();
+    for (const [ip, a] of authAttempts) if (now - a.windowStart > AUTH_WINDOW_MS) authAttempts.delete(ip);
+  }, 60_000);
+  sweeper.unref();
+
+  // Abandoned uploads (never completed) leave a .swiftssh-part file and state; clear them after a week.
+  const cleanStaleUploads = async () => {
+    for (const name of await fsp.readdir(paths.uploads).catch(() => [])) {
+      if (!name.endsWith('.json')) continue;
+      const statePath = path.join(paths.uploads, name);
+      const st = await fsp.stat(statePath).catch(() => null);
+      if (!st || Date.now() - st.mtimeMs < STALE_UPLOAD_MS) continue;
+      const state = readJson(statePath, null);
+      if (state?.partPath) await fsp.rm(state.partPath, { force: true });
+      await fsp.rm(statePath, { force: true });
+      uploads.delete(name.slice(0, -5));
+      log('removed stale upload', state?.dest || name);
+    }
+  };
+  cleanStaleUploads();
+  const janitor = setInterval(cleanStaleUploads, 6 * 60 * 60_000);
+  janitor.unref();
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
-  return { server, fingerprint, cert, port: server.address().port };
+
+  /** Stop accepting connections, end open shells, and resolve once the server is closed. */
+  const close = (graceMs = 5000) =>
+    new Promise((resolve) => {
+      clearInterval(sweeper);
+      clearInterval(janitor);
+      for (const ws of wss.clients) ws.close(1001, 'server shutting down');
+      server.close(() => resolve());
+      server.closeIdleConnections?.();
+      setTimeout(() => {
+        server.closeAllConnections?.();
+        resolve();
+      }, graceMs).unref();
+    });
+
+  return { server, fingerprint, cert, port: server.address().port, close };
 }
 
 function runShell(ws, url, { root, pty }) {

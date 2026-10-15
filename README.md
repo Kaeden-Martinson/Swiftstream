@@ -81,6 +81,33 @@ The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per
 
 The server uses a real PTY when `node-pty` is installed (an optional dependency) and falls back to plain pipes otherwise.
 
+## Running on a Void Linux server
+
+`deploy/void/install.sh` installs SwiftSSH as a runit service that starts on boot. It can also publish the website with nginx and HTTPS. Clone the repository on the server and run it as root:
+
+```bash
+sudo sh deploy/void/install.sh --user alice --authorize "swiftssh-ed25519 AAAA..."
+```
+
+What it does:
+
+- Installs `nodejs`, plus `base-devel` and `python3` so the full terminal (vim, htop) can build. Skip those with `--no-pty`.
+- Installs SwiftSSH globally from the checkout, and writes `/etc/sv/swiftssh`, which runs `swiftssh serve` as `--user` on port 7022 (change it with `--port`).
+- Sends logs to `/var/log/swiftssh` through `svlogd`, keeping 10 files of 1 MB.
+- Prints the server's fingerprint and the exact `swiftssh add` command to run on your computer.
+
+Run it again to update SwiftSSH; it restarts the service. To remove the service, run `--uninstall`, which keeps your keys and files. Day to day: `sv status swiftssh`, `sv restart swiftssh`, `tail -f /var/log/swiftssh/current`.
+
+Open port 7022/tcp in your firewall. The server limits failed logins to 10 per address per 10 minutes, after which that address gets HTTP 429 until the window passes.
+
+To also host the website:
+
+```bash
+sudo sh deploy/void/install.sh --user alice --site swiftssh.example.com --email you@example.com
+```
+
+This copies `site/` to `/var/www/swiftssh`, installs nginx, gets a Let's Encrypt certificate with certbot, and serves the site over HTTPS. The site gets HSTS, a strict Content Security Policy, gzip, caching for static files, and a 404 page. Point the domain's DNS at the server first, and open ports 80 and 443. Void doesn't ship a cron daemon by default, so install one (`xbps-install cronie`, then `ln -s /etc/sv/cronie /var/service/`) and add the renewal line the script prints.
+
 ## Development
 
 ```bash
@@ -95,6 +122,8 @@ npm --prefix app install
 npm run app         # run the app from source
 npm run app:dist    # build app/dist/SwiftSSH-Setup-<version>.exe
 ```
+
+The website is static files in `site/`. Preview it with `npx serve site`. `app/scripts/make-og.js` regenerates its share image (`npx electron scripts/make-og.js` from `app/`).
 
 The installer isn't code-signed yet, so Windows SmartScreen will warn the first time it runs. Choose "More info", then "Run anyway".
 

@@ -63,6 +63,9 @@ export function explainError(err, ctx = {}) {
       hint: ctx.publicKey ? `On ${where}, run:\n  swiftssh authorize "${ctx.publicKey}"` : 'Authorize your key on the host with "swiftssh authorize".',
     };
   }
+  if (err.status === 429) {
+    return { message: `${where} is temporarily blocking logins from this address after too many failed attempts.`, hint: 'Wait about 10 minutes, then try again.' };
+  }
   if (err.status === 401) return { message: `${where} rejected the login (${err.message}).`, hint: 'Try again; if it keeps failing, re-run "swiftssh deploy".' };
   if (/timed out/i.test(err.message)) return { message: `${where} stopped responding (${err.message}).`, hint: 'Check your connection and try again. Transfers resume where they left off.' };
   return { message: err.message };

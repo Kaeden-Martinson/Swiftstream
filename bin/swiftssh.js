@@ -272,8 +272,14 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
       console.log(`  then authorize that computer's key here:`);
       console.log(`    swiftssh authorize "<key from 'swiftssh key'>"`);
       console.log(c.dim(`\n  Press Ctrl+C to stop.`));
-      const shutdown = () => {
+      // runit and Ctrl+C both send a signal: finish open requests, close shells, then exit.
+      let stopping = false;
+      const shutdown = async () => {
+        if (stopping) return process.exit(1); // second signal: stop now
+        stopping = true;
+        console.log(`${new Date().toISOString()} shutting down`);
         fs.rmSync(paths.pid, { force: true });
+        await srv.close();
         process.exit(0);
       };
       process.on('SIGINT', shutdown);

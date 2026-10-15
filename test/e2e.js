@@ -134,6 +134,14 @@ try {
   assert.match(denied.err, /isn't authorized/);
   console.log('ok  unauthorized key rejected');
 
+  // Repeated failed logins from one address get rate limited (429), even with a valid key afterwards.
+  for (let i = 0; i < 10; i++) run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');
+  const limited = run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');
+  assert.match(limited.err, /too many failed attempts/);
+  const blockedGood = run(clientHome, 'exec', 'local', '--', 'echo', 'hi');
+  assert.match(blockedGood.err, /too many failed attempts/);
+  console.log('ok  brute-force login attempts rate limited');
+
   // A pinned fingerprint that doesn't match must refuse to connect.
   const hosts = JSON.parse(fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8'));
   hosts.local.fingerprint = hosts.local.fingerprint.replace(/^../, '00');

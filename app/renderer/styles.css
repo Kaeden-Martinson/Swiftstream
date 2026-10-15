@@ -120,14 +120,18 @@ svg { width: 16px; height: 16px; flex: none; }
 
 /* Transfers */
 .transfers { position: fixed; right: 16px; bottom: 16px; width: 340px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
-.job { background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 11px 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.job { background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 11px 13px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); animation: job-in .32s var(--ease) both; }
 .job-top { display: flex; align-items: center; gap: 8px; }
 .job-label { flex: 1; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.job-dir { color: var(--accent); font-size: 12px; }
-.job-close { border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
+.job-dir { display: inline-grid; place-items: center; color: var(--accent); }
+.job-dir svg { width: 14px; height: 14px; }
+.job.done .job-dir svg, .job.failed .job-dir svg { animation: pop .3s var(--ease); }
+.job.failed .job-dir { color: var(--danger); }
+.job-close { display: inline-grid; place-items: center; border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 3px; border-radius: 4px; }
+.job-close svg { width: 13px; height: 13px; }
 .job-close:hover { color: var(--text); }
 .job-bar { height: 4px; background: var(--line); border-radius: 2px; margin: 9px 0 6px; overflow: hidden; }
-.job-bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
+.job-bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s linear, background-color .3s; }
 .job.failed .job-bar > div { background: var(--danger); }
 .job-status { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .job-status button { border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
@@ -169,3 +173,51 @@ input::placeholder { color: var(--faint); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #454d5c; }
+
+/* ---------- Motion and loading states ---------- */
+:root { --ease: cubic-bezier(0.2, 0.7, 0.2, 1); }
+
+/* Skeleton placeholders: shown only while something is actually loading. */
+.sk { display: inline-block; height: 10px; border-radius: 4px; vertical-align: middle; background: linear-gradient(90deg, #1b1f26 0%, #272d37 45%, #1b1f26 90%); background-size: 220% 100%; animation: shimmer 1.3s linear infinite; }
+.sk-icon { height: 13px; }
+.sk-inline { height: 9px; }
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -100% 0; } }
+.file-table tr.sk-tr td { padding-top: 10px; padding-bottom: 10px; }
+.file-table tr.sk-tr:hover { background: transparent; }
+
+/* Terminal: skeleton lines until the remote shell answers. */
+.term-loading { position: absolute; inset: 0; z-index: 5; background: var(--bg); padding: 6px 4px; display: flex; flex-direction: column; gap: 12px; opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s; }
+.term.connecting .term-loading { opacity: 1; visibility: visible; }
+.term-loading .sk { height: 11px; }
+.term-loading-label { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+
+/* Host status: a soft pulse while checking. */
+.host-item .dot { transition: background-color .3s; }
+.host-item .dot.checking { background: var(--muted); animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+/* Entrances */
+.pane-enter { animation: fade-up .28s var(--ease) both; }
+.fade-in { animation: fade .3s ease both; }
+.file-table tbody tr.row-in { animation: fade-up .3s var(--ease) both; animation-delay: calc(var(--r, 0) * 18ms); }
+.banner:not([hidden]) { animation: banner-in .3s var(--ease) both; }
+.empty-inner { animation: fade-up .5s var(--ease) both; }
+.host-item { transition: background-color .15s, box-shadow .2s; }
+.btn, .icon-btn, .tab { transition: background-color .15s, border-color .15s, color .15s, transform .1s var(--ease); }
+.btn:active:not(:disabled), .icon-btn:active { transform: scale(0.97); }
+.dialog[open] { animation: dialog-in .22s var(--ease) both; }
+.dialog[open]::backdrop { animation: fade .22s ease both; }
+.job.leaving { animation: job-out .22s ease-in both; }
+.crumbs .sep { width: 12px; height: 12px; color: var(--faint); flex: none; }
+
+@keyframes fade { from { opacity: 0; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px); } }
+@keyframes banner-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes job-in { from { opacity: 0; transform: translateX(16px); } }
+@keyframes job-out { to { opacity: 0; transform: translateX(16px); } }
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+}

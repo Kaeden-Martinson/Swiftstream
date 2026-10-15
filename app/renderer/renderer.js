@@ -50,6 +50,15 @@ const icon = (pathData) => {
 };
 const FOLDER_ICON = '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" fill="currentColor" opacity=".85"/>';
 const FILE_ICON = '<path d="M6 3h8l5 5v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+const UP_ICON = '<path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+const DOWN_ICON = '<path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+const CLOSE_ICON = '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
+const CHEVRON_ICON = '<path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+const CHECK_ICON = '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+const ALERT_ICON = '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5v5.5M12 16.2v.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>';
+
+/** A shimmering placeholder bar, shown while something loads. */
+const skeleton = (width, className = '') => el('span', { className: `sk ${className}`.trim(), style: `width:${width}` });
 
 // ---------- host list ----------
 
@@ -70,7 +79,7 @@ function renderHostList() {
       const item = el(
         'li',
         { className: `host-item${h.name === state.selected ? ' active' : ''}`, tabIndex: 0, title: h.ssh ? `${h.address}, set up via ${h.ssh}` : h.address },
-        el('span', { className: `dot ${v.status === 'up' ? 'up' : v.status === 'down' ? 'down' : ''}` }),
+        el('span', { className: `dot ${v.status}`, title: { up: 'Connected', down: 'Not reachable', checking: 'Checking…' }[v.status] || '' }),
         el('div', { className: 'meta' }, el('div', { className: 'name', textContent: h.name }), el('div', { className: 'addr', textContent: h.address })),
       );
       item.addEventListener('click', () => selectHost(h.name));
@@ -94,6 +103,9 @@ async function selectHost(name) {
 async function checkHost(name) {
   const v = view(name);
   hideBanner();
+  v.status = 'checking';
+  renderHostList();
+  renderHeader();
   try {
     v.info = await call(api.hosts.info(name));
     v.status = 'up';
@@ -127,9 +139,23 @@ function renderHeader() {
   if (!host) return;
   const v = view(host.name);
   $('host-name').textContent = host.name;
-  const parts = [host.address];
-  if (v.info) parts.push(`${v.info.hostname} · ${platformName(v.info.platform)} · swiftssh ${v.info.version}`);
-  $('host-sub').textContent = parts.join('  ·  ');
+  const sub = $('host-sub');
+  if (v.info) {
+    sub.replaceChildren(`${host.address}  ·  ${v.info.hostname} · ${platformName(v.info.platform)} · swiftssh ${v.info.version}`);
+    sub.classList.add('fade-in');
+  } else if (v.status === 'checking') {
+    // Server details are on their way: hold their place instead of letting the header jump.
+    sub.replaceChildren(`${host.address}  ·  `, skeleton('180px', 'sk-inline'));
+  } else {
+    sub.replaceChildren(host.address);
+  }
+}
+
+/** Restart a one-shot CSS animation class on an element. */
+function replayAnimation(node, className) {
+  node.classList.remove(className);
+  void node.offsetWidth; // force a reflow so the animation starts again
+  node.classList.add(className);
 }
 
 const platformName = (p) => ({ linux: 'Linux', darwin: 'macOS', win32: 'Windows', freebsd: 'FreeBSD' })[p] || p;
@@ -138,8 +164,10 @@ function showTab(tab) {
   const host = currentHost();
   if (!host) return;
   const v = view(host.name);
+  const changed = v.tab !== tab;
   v.tab = tab;
   renderMain();
+  if (changed) replayAnimation($(tab === 'terminal' ? 'terminal-pane' : 'files-pane'), 'pane-enter');
   if (v.status !== 'up') return;
   if (tab === 'terminal') ensureTerminal(host.name);
   else if (!v.listing) openDir(host.name, v.cwd || '');
@@ -223,6 +251,14 @@ function ensureTerminal(name) {
   const fit = new FitAddon.FitAddon();
   xterm.loadAddon(fit);
   xterm.open(container);
+  // Placeholder lines shown until the remote shell says hello.
+  const loading = el(
+    'div',
+    { className: 'term-loading' },
+    ...['46%', '30%', '58%', '22%'].map((w) => el('div', { className: 'sk-line' }, skeleton(w))),
+    el('div', { className: 'term-loading-label', textContent: `Connecting to ${name}…` }),
+  );
+  container.append(loading);
   v.term = { xterm, fit, id: null, pty: true, line: '', container };
   // Ctrl+Shift+C / Ctrl+Shift+V copy and paste, like other terminals on Windows and Linux.
   xterm.attachCustomKeyEventHandler((e) => {
@@ -252,11 +288,12 @@ function fitTerminal(term) {
 
 async function startSession(name) {
   const term = view(name).term;
-  term.xterm.write('\x1b[2mConnecting…\x1b[0m\r\n');
+  term.container.classList.add('connecting');
   try {
     term.id = await call(api.term.open(name, term.xterm.cols, term.xterm.rows));
     terminals.set(term.id, name);
   } catch (err) {
+    term.container.classList.remove('connecting');
     term.xterm.write(`\x1b[31m${err.message}\x1b[0m\r\n${err.hint ? `\x1b[2m${err.hint.replace(/\n/g, '\r\n')}\x1b[0m\r\n` : ''}`);
     term.ended = true;
     term.xterm.write('\r\n\x1b[2mPress Enter to try again.\x1b[0m\r\n');
@@ -298,6 +335,7 @@ api.term.onHello((id, { pty }) => {
   if (!name) return;
   const term = view(name).term;
   term.pty = pty;
+  term.container.classList.remove('connecting');
   term.xterm.reset();
   if (!pty) {
     term.xterm.options.convertEol = true;
@@ -332,23 +370,48 @@ new ResizeObserver(() => {
 
 async function openDir(name, dir) {
   const v = view(name);
+  const request = (v.dirRequest = (v.dirRequest || 0) + 1);
+  // Only show the skeleton if the folder takes a moment; fast loads shouldn't flicker.
+  const skeletonTimer = setTimeout(() => {
+    if (v.dirRequest !== request) return;
+    v.loadingDir = true;
+    if (state.selected === name) renderFileSkeleton();
+  }, 120);
   try {
-    v.listing = await call(api.files.ls(name, dir));
-    v.cwd = v.listing.path;
+    const listing = await call(api.files.ls(name, dir));
+    if (v.dirRequest !== request) return; // the user already navigated elsewhere
+    v.listing = listing;
+    v.cwd = listing.path;
     v.selection.clear();
+    v.animateRows = true;
     hideBanner();
   } catch (err) {
-    showBanner(err);
+    if (v.dirRequest === request) showBanner(err);
+  } finally {
+    clearTimeout(skeletonTimer);
+    if (v.dirRequest === request) v.loadingDir = false;
   }
   if (state.selected === name) renderFiles();
+}
+
+function renderFileSkeleton() {
+  $('files-empty').hidden = true;
+  $('file-rows').replaceChildren(
+    ...['180px', '120px', '220px', '150px', '196px', '104px', '164px'].map((w) =>
+      el('tr', { className: 'sk-tr' }, el('td', {}, el('span', { className: 'file-name' }, skeleton('15px', 'sk-icon'), skeleton(w))), el('td', { className: 'num' }, skeleton('44px')), el('td', {}, skeleton('110px'))),
+    ),
+  );
 }
 
 function renderFiles() {
   const host = currentHost();
   if (!host) return;
   const v = view(host.name);
+  if (v.loadingDir) return renderFileSkeleton();
   const listing = v.listing;
   if (!listing) return;
+  const animate = v.animateRows;
+  v.animateRows = false;
   renderCrumbs(host.name, listing.path);
   $('files-up').disabled = !listing.parent;
   $('files-empty').hidden = listing.entries.length > 0;
@@ -357,10 +420,14 @@ function renderFiles() {
   $('files-download').textContent = v.selection.size > 1 ? `Download ${v.selection.size}` : 'Download';
 
   $('file-rows').replaceChildren(
-    ...listing.entries.map((entry) => {
+    ...listing.entries.map((entry, index) => {
       const row = el(
         'tr',
-        { className: v.selection.has(entry.name) ? 'selected' : '' },
+        {
+          className: `${v.selection.has(entry.name) ? 'selected' : ''}${animate ? ' row-in' : ''}`,
+          // Stagger only the first rows; a long folder shouldn't take seconds to settle.
+          style: animate ? `--r:${Math.min(index, 14)}` : '',
+        },
         el('td', {}, el('span', { className: `file-name${entry.isDirectory ? ' dir' : ''}` }, icon(entry.isDirectory ? FOLDER_ICON : FILE_ICON), entry.name)),
         el('td', { className: 'num muted', textContent: entry.isDirectory ? '' : formatBytes(entry.size) }),
         el('td', { className: 'muted', textContent: dateFmt.format(entry.mtime) }),
@@ -402,7 +469,11 @@ function renderCrumbs(name, fullPath) {
     ...shown.flatMap(([label, target], i) => {
       const btn = el('button', { textContent: label, disabled: !target });
       if (target) btn.addEventListener('click', () => openDir(name, target));
-      return i === 0 ? [btn] : [el('span', { className: 'sep', textContent: '›' }), btn];
+      if (i === 0) return [btn];
+      const sep = icon(CHEVRON_ICON);
+      sep.classList.add('sep');
+      sep.setAttribute('aria-hidden', 'true');
+      return [sep, btn];
     }),
   );
 }
@@ -498,23 +569,30 @@ window.addEventListener('drop', (e) => e.preventDefault());
 
 const jobs = new Map();
 
+/** Slide a transfer card out, then remove it. */
+function dismissJob(id) {
+  const job = jobs.get(id);
+  if (!job) return;
+  jobs.delete(id);
+  job.card.classList.add('leaving');
+  job.card.addEventListener('animationend', () => job.card.remove(), { once: true });
+}
+
 api.transfers.onStart(({ id, host, label, direction, total }) => {
   const bar = el('div');
   const status = el('div', { className: 'job-status' }, el('span', { textContent: 'Starting…' }), el('span'));
-  const close = el('button', { className: 'job-close', title: 'Dismiss', textContent: '×' });
+  const close = el('button', { className: 'job-close', title: 'Dismiss', ariaLabel: 'Dismiss' }, icon(CLOSE_ICON));
+  const dirIcon = el('span', { className: 'job-dir' }, icon(direction === 'up' ? UP_ICON : DOWN_ICON));
   const card = el(
     'div',
     { className: 'job' },
-    el('div', { className: 'job-top' }, el('span', { className: 'job-dir', textContent: direction === 'up' ? '↑' : '↓' }), el('span', { className: 'job-label', textContent: label }), close),
+    el('div', { className: 'job-top' }, dirIcon, el('span', { className: 'job-label', textContent: label }), close),
     el('div', { className: 'job-bar' }, bar),
     status,
   );
-  close.addEventListener('click', () => {
-    card.remove();
-    jobs.delete(id);
-  });
+  close.addEventListener('click', () => dismissJob(id));
   $('transfers').prepend(card);
-  jobs.set(id, { card, bar, status, total, host, direction, started: performance.now() });
+  jobs.set(id, { card, bar, status, dirIcon, total, host, direction, started: performance.now() });
 });
 
 api.transfers.onProgress(({ id, done, total }) => {
@@ -532,11 +610,14 @@ api.transfers.onDone(({ id, error, revealPath }) => {
   const secs = (performance.now() - job.started) / 1000;
   if (error) {
     job.card.classList.add('failed');
+    job.dirIcon.replaceChildren(icon(ALERT_ICON));
     job.status.firstChild.textContent = 'Failed';
     job.status.lastChild.textContent = '';
     job.card.append(el('div', { className: 'job-error', textContent: `${error.message}${error.hint ? ` ${error.hint}` : ''}` }));
     return;
   }
+  job.card.classList.add('done');
+  job.dirIcon.replaceChildren(icon(CHECK_ICON));
   job.bar.style.width = '100%';
   job.status.firstChild.textContent = `Done in ${secs < 10 ? secs.toFixed(1) : Math.round(secs)}s`;
   job.status.lastChild.textContent = '';
@@ -547,12 +628,7 @@ api.transfers.onDone(({ id, error, revealPath }) => {
   } else if (state.selected === job.host) {
     openDir(job.host, view(job.host).cwd); // refresh so the upload appears
   }
-  setTimeout(() => {
-    if (!revealPath && jobs.has(id)) {
-      job.card.remove();
-      jobs.delete(id);
-    }
-  }, 6000);
+  setTimeout(() => !revealPath && dismissJob(id), 6000);
 });
 
 // ---------- dialogs ----------

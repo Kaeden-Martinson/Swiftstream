@@ -1,0 +1,348 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import https from 'node:https';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { WebSocketServer } from 'ws';
+import { ensureDir, paths, readJson, writeJson } from './config.js';
+import { authMessage, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, verify } from './keys.js';
+import { loadOrCreateServerCert } from './tls.js';
+import { hashFile } from './util.js';
+
+const CHALLENGE_TTL_MS = 60_000;
+const SESSION_TTL_MS = 12 * 60 * 60_000;
+const MAX_CHUNK_SIZE = 64 * 1024 * 1024;
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function loadPty() {
+  try {
+    return (await import('node-pty')).default;
+  } catch {
+    return null;
+  }
+}
+
+function log(...args) {
+  console.log(new Date().toISOString(), ...args);
+}
+
+export async function startServer({ port, host = '0.0.0.0', root = os.homedir() }) {
+  const { key, cert, fingerprint } = loadOrCreateServerCert();
+  const pty = await loadPty();
+  ensureDir(paths.uploads);
+
+  const challenges = new Map(); // nonce -> expiry
+  const sessions = new Map(); // token -> { expires, key }
+  const uploads = new Map(); // id -> upload state (mirrored to disk so uploads survive restarts)
+
+  const resolvePath = (p) => {
+    if (typeof p !== 'string' || !p) throw new HttpError(400, 'path is required');
+    if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
+    return path.resolve(root, p);
+  };
+
+  const authenticate = (req) => {
+    const match = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+    const session = match && sessions.get(match[1]);
+    if (!session || session.expires < Date.now()) throw new HttpError(401, 'not authenticated');
+    return session;
+  };
+
+  const loadUpload = (id) => {
+    if (!/^[a-f0-9]{32}$/.test(id)) throw new HttpError(400, 'bad upload id');
+    let state = uploads.get(id);
+    if (!state) {
+      state = readJson(path.join(paths.uploads, `${id}.json`), null);
+      if (!state) throw new HttpError(404, 'unknown upload');
+      state.received = new Set(state.received);
+      uploads.set(id, state);
+    }
+    return state;
+  };
+
+  const persistUpload = (id, state) =>
+    writeJson(path.join(paths.uploads, `${id}.json`), { ...state, received: [...state.received] });
+
+  const routes = {
+    'POST /v1/auth/challenge': async () => {
+      const nonce = crypto.randomBytes(32).toString('base64url');
+      challenges.set(nonce, Date.now() + CHALLENGE_TTL_MS);
+      return { nonce, fingerprint };
+    },
+
+    'POST /v1/auth/verify': async (req) => {
+      const { publicKey, nonce, signature } = await readJsonBody(req);
+      const expires = challenges.get(nonce);
+      challenges.delete(nonce);
+      if (!expires || expires < Date.now()) throw new HttpError(401, 'challenge expired');
+      const wanted = normalizePublicKey(String(publicKey || ''));
+      if (!readAuthorizedKeys().some((k) => normalizePublicKey(k) === wanted)) {
+        throw new HttpError(401, 'key not authorized');
+      }
+      if (!verify(decodePublicKey(wanted), authMessage(nonce, fingerprint), signature)) {
+        throw new HttpError(401, 'bad signature');
+      }
+      const token = crypto.randomBytes(32).toString('base64url');
+      sessions.set(token, { expires: Date.now() + SESSION_TTL_MS, key: wanted });
+      log('auth ok', keyFingerprint(wanted), req.socket.remoteAddress);
+      return { token, expiresIn: SESSION_TTL_MS / 1000 };
+    },
+
+    'GET /v1/info': async (req) => {
+      authenticate(req);
+      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty };
+    },
+
+    'GET /v1/stat': async (req, url) => {
+      authenticate(req);
+      const file = resolvePath(url.searchParams.get('path'));
+      const st = await fsp.stat(file).catch(() => {
+        throw new HttpError(404, `no such file: ${file}`);
+      });
+      const result = { path: file, size: st.size, mtime: st.mtimeMs, isDirectory: st.isDirectory() };
+      if (url.searchParams.get('hash') && st.isFile()) result.sha256 = await hashFile(file);
+      return result;
+    },
+
+    'POST /v1/upload/init': async (req) => {
+      authenticate(req);
+      const body = await readJsonBody(req);
+      const size = Number(body.size);
+      const chunkSize = Number(body.chunkSize);
+      if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, 'bad size');
+      if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || chunkSize > MAX_CHUNK_SIZE) throw new HttpError(400, 'bad chunkSize');
+      if (!/^[a-f0-9]{64}$/.test(body.sha256)) throw new HttpError(400, 'bad sha256');
+
+      let dest = resolvePath(body.path);
+      const intoDir = /[\\/]$/.test(body.path) || fs.statSync(dest, { throwIfNoEntry: false })?.isDirectory();
+      if (intoDir) dest = path.join(dest, path.basename(body.name || 'upload'));
+
+      // Same file to the same destination -> same id, which is what makes uploads resumable.
+      const id = crypto.createHash('sha256').update(`${dest}\0${size}\0${body.sha256}\0${chunkSize}`).digest('hex').slice(0, 32);
+      const statePath = path.join(paths.uploads, `${id}.json`);
+      let state = uploads.get(id) || readJson(statePath, null);
+      if (state && !fs.existsSync(state.partPath)) state = null;
+      if (!state) {
+        await fsp.mkdir(path.dirname(dest), { recursive: true });
+        // The partial file lives beside the destination so the final rename never crosses filesystems.
+        const partPath = `${dest}.swiftssh-part`;
+        const fh = await fsp.open(partPath, 'w');
+        await fh.truncate(size);
+        await fh.close();
+        state = { dest, partPath, size, chunkSize, sha256: body.sha256, received: [] };
+        writeJson(statePath, state);
+      }
+      state.received = new Set(state.received);
+      uploads.set(id, state);
+      return { id, dest, chunks: Math.ceil(size / chunkSize), received: [...state.received] };
+    },
+
+    'POST /v1/upload/complete': async (req, url) => {
+      authenticate(req);
+      const id = url.searchParams.get('id');
+      const state = loadUpload(id);
+      const chunks = Math.ceil(state.size / state.chunkSize);
+      if (state.received.size !== chunks) throw new HttpError(409, `missing ${chunks - state.received.size} chunks`);
+      const actual = await hashFile(state.partPath);
+      if (actual !== state.sha256) {
+        // Integrity failure: throw away everything so the client starts clean.
+        await fsp.rm(state.partPath, { force: true });
+        await fsp.rm(path.join(paths.uploads, `${id}.json`), { force: true });
+        uploads.delete(id);
+        throw new HttpError(422, 'checksum mismatch; upload discarded');
+      }
+      await fsp.rename(state.partPath, state.dest);
+      await fsp.rm(path.join(paths.uploads, `${id}.json`), { force: true });
+      uploads.delete(id);
+      log('upload complete', state.dest, state.size);
+      return { path: state.dest, size: state.size, sha256: actual };
+    },
+
+    'PUT /v1/upload/chunk': async (req, url) => {
+      authenticate(req);
+      const id = url.searchParams.get('id');
+      const index = Number(url.searchParams.get('index'));
+      const state = loadUpload(id);
+      const chunks = Math.ceil(state.size / state.chunkSize);
+      if (!Number.isInteger(index) || index < 0 || index >= chunks) throw new HttpError(400, 'bad chunk index');
+      const offset = index * state.chunkSize;
+      const expectedLength = Math.min(state.chunkSize, state.size - offset);
+      const data = await readBody(req, expectedLength);
+      if (data.length !== expectedLength) throw new HttpError(400, `chunk ${index} should be ${expectedLength} bytes`);
+      const digest = crypto.createHash('sha256').update(data).digest('hex');
+      if (digest !== req.headers['x-chunk-sha256']) throw new HttpError(422, `chunk ${index} corrupted in transit`);
+      const fh = await fsp.open(state.partPath, 'r+');
+      try {
+        await fh.write(data, 0, data.length, offset);
+      } finally {
+        await fh.close();
+      }
+      state.received.add(index);
+      persistUpload(id, state);
+      return { ok: true };
+    },
+
+    'GET /v1/file': async (req, url, res) => {
+      authenticate(req);
+      const file = resolvePath(url.searchParams.get('path'));
+      const st = await fsp.stat(file).catch(() => null);
+      if (!st?.isFile()) throw new HttpError(404, `no such file: ${file}`);
+      let start = 0;
+      let end = st.size - 1;
+      const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+      if (range) {
+        start = Number(range[1]);
+        end = range[2] ? Math.min(Number(range[2]), st.size - 1) : st.size - 1;
+        if (start > end) throw new HttpError(416, 'range not satisfiable');
+        res.writeHead(206, {
+          'content-type': 'application/octet-stream',
+          'content-length': end - start + 1,
+          'content-range': `bytes ${start}-${end}/${st.size}`,
+        });
+      } else {
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': st.size, 'accept-ranges': 'bytes' });
+      }
+      if (st.size === 0) return res.end();
+      fs.createReadStream(file, { start, end }).pipe(res);
+      return undefined; // response handled
+    },
+  };
+
+  const server = https.createServer({ key, cert }, async (req, res) => {
+    const url = new URL(req.url, 'https://localhost');
+    const route = routes[`${req.method} ${url.pathname}`];
+    try {
+      if (!route) throw new HttpError(404, 'not found');
+      const result = await route(req, url, res);
+      if (result !== undefined) sendJson(res, 200, result);
+    } catch (err) {
+      const status = err.status || 500;
+      if (status === 500) log('error', req.method, url.pathname, err);
+      if (!res.headersSent) sendJson(res, status, { error: err.message });
+      else res.destroy();
+    }
+  });
+  server.keepAliveTimeout = 30_000;
+
+  // Interactive shell / remote exec over WebSocket on the same port.
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, 'https://localhost');
+    try {
+      if (url.pathname !== '/v1/shell') throw new HttpError(404, 'not found');
+      authenticate(req);
+    } catch (err) {
+      socket.end(`HTTP/1.1 ${err.status || 400} ${err.message}\r\n\r\n`);
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => runShell(ws, url, { root, pty }));
+  });
+
+  // Expire stale challenges/sessions so memory doesn't grow forever.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, exp] of challenges) if (exp < now) challenges.delete(k);
+    for (const [k, s] of sessions) if (s.expires < now) sessions.delete(k);
+  }, 60_000).unref();
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, resolve);
+  });
+  return { server, fingerprint, cert, port: server.address().port };
+}
+
+function runShell(ws, url, { root, pty }) {
+  const cmd = url.searchParams.get('cmd');
+  const cols = Number(url.searchParams.get('cols')) || 80;
+  const rows = Number(url.searchParams.get('rows')) || 24;
+  const wantPty = url.searchParams.get('pty') === '1' && !!pty;
+  const isWin = process.platform === 'win32';
+  const shell = isWin ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || '/bin/sh';
+  const control = (msg) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
+  // Binary frames carry a 1-byte stream id: 0 = stdin, 1 = stdout, 2 = stderr.
+  const out = (streamId, data) => ws.readyState === ws.OPEN && ws.send(Buffer.concat([Buffer.from([streamId]), Buffer.from(data)]));
+  let exited = false;
+  const onExit = (code) => {
+    if (exited) return;
+    exited = true;
+    control({ type: 'exit', code: code ?? 1 });
+    ws.close();
+  };
+
+  control({ type: 'hello', pty: wantPty, platform: process.platform });
+
+  if (wantPty) {
+    const args = cmd ? (isWin ? ['/c', cmd] : ['-c', cmd]) : [];
+    const term = pty.spawn(shell, args, { name: 'xterm-256color', cols, rows, cwd: root, env: process.env });
+    term.onData((d) => out(1, d));
+    term.onExit(({ exitCode }) => onExit(exitCode));
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return term.write(data.subarray(1).toString());
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'resize') term.resize(msg.cols, msg.rows);
+    });
+    ws.on('close', () => !exited && term.kill());
+    return;
+  }
+
+  const child = cmd
+    ? spawn(cmd, { shell: true, cwd: root, env: process.env })
+    : spawn(shell, isWin ? [] : ['-i'], { cwd: root, env: process.env });
+  child.stdout.on('data', (d) => out(1, d));
+  child.stderr.on('data', (d) => out(2, d));
+  child.on('error', (err) => {
+    out(2, `${err.message}\n`);
+    onExit(127);
+  });
+  child.on('close', onExit);
+  child.stdin.on('error', () => {});
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) return child.stdin.write(data.subarray(1));
+    const msg = JSON.parse(data.toString());
+    if (msg.type === 'eof') child.stdin.end();
+  });
+  ws.on('close', () => !exited && child.kill());
+}
+
+function sendJson(res, status, body) {
+  const data = Buffer.from(JSON.stringify(body));
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': data.length });
+  res.end(data);
+}
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (c) => {
+      total += c.length;
+      if (total > limit) {
+        reject(new HttpError(413, 'body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function readJsonBody(req) {
+  const body = await readBody(req, 64 * 1024);
+  try {
+    return JSON.parse(body.toString() || '{}');
+  } catch {
+    throw new HttpError(400, 'invalid JSON');
+  }
+}

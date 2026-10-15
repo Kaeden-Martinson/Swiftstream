@@ -1,0 +1,24 @@
+{
+  "name": "swiftssh",
+  "version": "0.1.0",
+  "description": "Fast, loss-tolerant remote shell and file transfer over HTTPS with SSH-style key auth",
+  "type": "module",
+  "bin": {
+    "swiftssh": "bin/swiftssh.js"
+  },
+  "files": ["bin", "src"],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "node test/e2e.js"
+  },
+  "dependencies": {
+    "selfsigned": "^2.4.1",
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "license": "MIT"
+}

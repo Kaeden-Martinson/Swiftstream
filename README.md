@@ -7,11 +7,19 @@ There are two ways to use it: the **desktop app** (terminal and file browser) or
 
 ## Desktop app
 
-Download `SwiftSSH-Setup-<version>.exe` and run it. Choose **Add a server**, enter the SSH login you already use (like `ubuntu@203.0.113.7`), and the app sets the server up. After that:
+Download `SwiftSSH-Setup-<version>.exe` and run it. Type an SSH login like `ubuntu@203.0.113.7` in the search bar and press **Connect**. The app logs in once, installs SwiftSSH on the server and opens it in a tab.
 
-- **Terminal tab:** a full terminal on the server. Copy with Ctrl+Shift+C.
-- **Files tab:** browse folders, drag files or folders in to upload, select items and press Download. Transfers show their progress at the bottom right and resume if interrupted.
-- **Error messages** say what went wrong and what to do. If the server stopped, a **Start server again** button restarts it over SSH.
+- **Servers home:** your servers as cards, in groups you choose, with a live status dot on each. Search by name, address, login or group. Right-click a card for terminal, files, edit, restart and remove, plus any actions you've added.
+- **Tabs:** open several servers at once. Ctrl+Tab moves between them and Ctrl+W closes one. The app reopens the tabs you had open last time.
+- **Terminal:** a full terminal on the server. Copy with Ctrl+Shift+C.
+- **Files:** your computer on the left, the server on the right.
+  - Drag between the two panes, or drag in from Explorer, to transfer. Drop onto a folder row to send it there.
+  - Each pane has back, forward and up buttons; your mouse's back and forward buttons work too, as do Alt+Left and Alt+Right.
+  - Filter a folder with Ctrl+F. Click the path bar (or press Ctrl+L) to type or paste a path.
+  - Right-click for open, transfer, rename (F2), delete (Del), new folder and copy path. Deleting on your computer goes to the Recycle Bin; deleting on a server asks first.
+  - The app remembers where you uploaded files from each folder on your computer. Next time, it offers that spot, and shows a **Go there** link when you open the same folder on the left.
+- **Auto-healing:** the app checks your servers every 30 seconds. If SwiftSSH stops or the server reboots, it logs back in over SSH with this computer's key, which setup added to the server's `~/.ssh/authorized_keys`. It then restarts SwiftSSH and reconnects your terminal, without needing a password. Where the server has `crontab`, setup also adds an `@reboot` entry so SwiftSSH starts on boot.
+- **Settings:** turn auto-healing on or off, change how often servers are checked, show or hide dotfiles, and edit your right-click actions. Actions are commands like `df -h` or `tail -f {path}` that run in the server's terminal.
 
 Log in with a password or your SSH key. The password is used only for that one login, plus `sudo` if Node.js has to be installed, and is never saved. From then on the app uses its own key.
 
@@ -108,6 +116,34 @@ The first `swiftssh connect user@host`:
 If the saved server stops answering (after a reboot, say), `connect` offers to log in and start it again.
 
 The executable embeds the Node version that built it (about 90 MB) and isn't code-signed yet.
+
+## Releasing and publishing the website
+
+The website (`site/`) hosts the downloads itself.
+
+```bash
+npm run release
+```
+
+This builds everything and puts the files in `site/downloads/`:
+
+| File | What it is |
+|---|---|
+| `SwiftSSH-Setup-<version>.exe` | Desktop app installer for Windows |
+| `swiftssh-<version>-win-x64.exe` | Command line for Windows, Node built in |
+| `swiftssh-<version>.cjs` | Command line for any system with Node.js 18+ |
+| `SHA256SUMS.txt` | Checksums for the files above |
+| `latest.json` | What the site reads to fill in links, sizes and checksums |
+
+The site's download buttons always point at the current version, and the main button offers the app on Windows and the command line elsewhere. `npm run release -- --no-app` skips the slow installer build and keeps the last one. The installer is built in `app/release`, so a copy of the app running from `app/dist` doesn't block the build. The built files aren't committed to git.
+
+Then upload the site, downloads included, to your server over SwiftSSH. Only changed files are sent:
+
+```bash
+npm run publish-site -- <server> [remote folder]
+```
+
+The default remote folder is `/var/www/swiftssh`. That's the folder `deploy/void/install.sh --site` serves with nginx and makes writable for your user, so publishing doesn't need root. nginx serves `/downloads/` as file downloads, and `latest.json` uncached so a new release shows up immediately.
 
 ## Running on a Void Linux server
 

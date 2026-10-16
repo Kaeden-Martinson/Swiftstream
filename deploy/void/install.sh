@@ -158,6 +158,8 @@ if [ -n "$SITE_DOMAIN" ]; then
   xbps-install -y nginx
   mkdir -p "$WEB_ROOT" "$ACME_ROOT" /etc/nginx/conf.d
   cp -R "$REPO_DIR/site/." "$WEB_ROOT/"
+  # Owned by the SwiftSSH user, so "npm run publish-site" can update it over SwiftSSH without root.
+  chown -R "$RUN_USER:$RUN_GROUP" "$WEB_ROOT"
   chmod -R a+rX "$WEB_ROOT" "$ACME_ROOT"
 
   if ! grep -q 'conf.d/\*.conf' /etc/nginx/nginx.conf; then

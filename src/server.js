@@ -281,6 +281,32 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       return { path: dir, parent: parent === dir ? null : parent, home: os.homedir(), entries };
     },
 
+    'POST /v1/rename': async (req) => {
+      authenticate(req);
+      const { from, to } = await readJsonBody(req);
+      const src = resolvePath(from);
+      const dest = resolvePath(to);
+      if (!(await fsp.stat(src).catch(() => null))) throw new HttpError(404, `no such file or folder: ${src}`);
+      if (await fsp.stat(dest).catch(() => null)) throw new HttpError(409, `something called ${path.basename(dest)} is already there`);
+      await fsp.rename(src, dest);
+      log('renamed', src, '->', dest);
+      return { path: dest };
+    },
+
+    'POST /v1/rm': async (req) => {
+      authenticate(req);
+      const { path: p } = await readJsonBody(req);
+      const target = resolvePath(p);
+      // Refuse the obviously catastrophic: the filesystem root, the server's root, a home folder.
+      const protectedPaths = [path.parse(target).root, root, os.homedir()].map((x) => path.resolve(x));
+      if (protectedPaths.includes(path.resolve(target))) throw new HttpError(400, `refusing to delete ${target}`);
+      const st = await fsp.lstat(target).catch(() => null);
+      if (!st) throw new HttpError(404, `no such file or folder: ${target}`);
+      await fsp.rm(target, { recursive: st.isDirectory(), force: false });
+      log('deleted', target);
+      return { path: target };
+    },
+
     'POST /v1/mkdir': async (req) => {
       authenticate(req);
       const { path: p } = await readJsonBody(req);

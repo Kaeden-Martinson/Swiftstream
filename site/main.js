@@ -211,3 +211,60 @@ if (details && !reduceMotion && details.animate) {
     }
   });
 }
+
+// ---------- downloads: real files, sizes and checksums from downloads/latest.json ----------
+const isWindows = /win/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+const formatSize = (bytes) => {
+  const mb = bytes / 1024 / 1024;
+  if (mb >= 10) return `${Math.round(mb)} MB`;
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
+function applyManifest(manifest) {
+  const byKind = Object.fromEntries(manifest.files.map((f) => [f.kind, f]));
+  for (const row of document.querySelectorAll('#platforms [data-kind]')) {
+    const file = byKind[row.dataset.kind];
+    if (!file) {
+      row.classList.add('unavailable');
+      continue;
+    }
+    row.querySelector('[data-dl-link]').href = `downloads/${file.name}`;
+    const meta = row.querySelector('[data-dl-meta]');
+    meta.textContent = `${meta.textContent.split(' · ')[0]} · ${formatSize(file.size)}`;
+    const sum = row.querySelector('[data-dl-sum]');
+    sum.dataset.copy = file.sha256;
+    sum.textContent = `SHA-256 ${file.sha256.slice(0, 16)}…`;
+    sum.title = 'Copy the full checksum';
+    sum.hidden = false;
+  }
+  const release = $('dl-release');
+  release.replaceChildren(`Version ${manifest.version} · released ${manifest.released} · `, Object.assign(document.createElement('a'), { href: 'downloads/SHA256SUMS.txt', textContent: 'SHA256SUMS.txt' }));
+  for (const v of document.querySelectorAll('.footer-ver')) v.textContent = `v${manifest.version}`;
+
+  // The hero button offers what fits this computer: the app on Windows, the command line elsewhere.
+  const hero = $('hero-download');
+  const pick = isWindows ? byKind['app-windows'] : byKind['cli-portable'];
+  if (pick) hero.href = `downloads/${pick.name}`;
+  if (!isWindows && pick) {
+    hero.querySelector('use').setAttribute('href', '#i-terminal');
+    hero.querySelector('span').textContent = 'Download the command line';
+    $('hero-fine').textContent = 'The desktop app is Windows-only for now. The command line needs Node.js 18+ on this computer.';
+  }
+}
+
+(async () => {
+  try {
+    const res = await fetch('downloads/latest.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(String(res.status));
+    applyManifest(await res.json());
+  } catch {
+    // Opened without a published release (e.g. a local preview): say so instead of linking to missing files.
+    for (const link of document.querySelectorAll('[data-dl-link], #hero-download')) {
+      link.removeAttribute('download');
+      link.href = '#download';
+    }
+    const note = $('dl-note');
+    note.textContent = 'Downloads aren\'t published on this copy of the site yet. Run "npm run release", then "npm run publish-site".';
+    note.hidden = false;
+  }
+})();

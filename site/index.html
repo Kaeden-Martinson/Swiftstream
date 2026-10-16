@@ -20,6 +20,7 @@
 <body>
   <!-- One icon set, referenced with <use>. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -65,13 +66,13 @@
           <h1 class="enter" style="--i:1">Keep your SSH login. Lose the slow transfers.</h1>
           <p class="lede enter" style="--i:2">SwiftSSH uses SSH once to start itself on your server. After that, files move over HTTPS on eight connections at once, and anything unchanged is skipped.</p>
           <div class="cta-row enter" style="--i:3">
-            <a class="btn btn-primary" href="#download"><svg aria-hidden="true"><use href="#i-windows"/></svg>Download for Windows</a>
-            <button class="cmd" type="button" data-copy="npm i -g swiftssh" aria-label="Copy install command: npm i -g swiftssh">
-              <span>npm i -g swiftssh</span>
+            <a class="btn btn-primary" id="hero-download" href="downloads/SwiftSSH-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Download for Windows</span></a>
+            <button class="cmd" type="button" data-copy="swiftssh connect ubuntu@your-server" aria-label="Copy example command: swiftssh connect ubuntu@your-server">
+              <span>swiftssh connect ubuntu@your-server</span>
               <svg class="copy-icon" aria-hidden="true"><use href="#i-copy"/></svg>
             </button>
           </div>
-          <p class="fine enter" style="--i:4">Servers need Node.js 18 or newer. macOS and Linux apps build from source.</p>
+          <p class="fine enter" style="--i:4" id="hero-fine">Works with any Linux or macOS server you can SSH into. SwiftSSH installs itself there, and Node.js if it's missing.</p>
         </div>
 
         <figure class="window hero-window enter" style="--i:2" id="hero-window" aria-label="The SwiftSSH desktop app uploading files to a server">
@@ -297,30 +298,46 @@
         <div>
           <p class="eyebrow">05 · download</p>
           <h2 id="download-title">Get SwiftSSH</h2>
-          <p class="body-muted">Your servers need Node.js 18 or newer. SwiftSSH installs itself there the first time you connect, or run the Void Linux installer to keep it running as a service.</p>
+          <p class="body-muted">Pick the app or the command line. Either one sets a server up the first time you connect: it logs in over SSH, installs itself there (and Node.js if it's missing), and remembers the server.</p>
+          <p class="dl-release muted" id="dl-release">Version 0.1.0 · <a href="downloads/SHA256SUMS.txt">SHA256SUMS.txt</a></p>
         </div>
-        <ul class="platforms">
-          <li>
-            <svg aria-hidden="true"><use href="#i-windows"/></svg>
-            <div><h3>Windows</h3><p>Installer · 64-bit · 107 MB</p></div>
-            <a class="btn btn-primary btn-small" href="https://github.com/Kaeden-Martinson/SwiftSSH/releases/latest">Download</a>
-          </li>
-          <li>
-            <svg aria-hidden="true"><use href="#i-apple"/></svg>
-            <div><h3>macOS</h3><p>Signed build coming. Build from source today.</p></div>
-            <a class="btn btn-small" href="https://github.com/Kaeden-Martinson/SwiftSSH#development">Build guide</a>
-          </li>
-          <li>
-            <svg aria-hidden="true"><use href="#i-linux"/></svg>
-            <div><h3>Linux</h3><p>AppImage and .deb from source.</p></div>
-            <a class="btn btn-small" href="https://github.com/Kaeden-Martinson/SwiftSSH#development">Build guide</a>
-          </li>
-          <li>
-            <svg aria-hidden="true"><use href="#i-terminal"/></svg>
-            <div><h3>Command line</h3><p class="mono">npm i -g swiftssh</p></div>
-            <button class="btn btn-small" type="button" data-copy="npm i -g swiftssh" aria-label="Copy install command: npm i -g swiftssh"><svg class="copy-icon" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
-          </li>
-        </ul>
+        <div>
+          <ul class="platforms" id="platforms">
+            <li data-kind="app-windows">
+              <svg aria-hidden="true"><use href="#i-windows"/></svg>
+              <div>
+                <h3>Desktop app for Windows</h3>
+                <p><span data-dl-meta>64-bit installer</span></p>
+                <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
+              </div>
+              <a class="btn btn-primary btn-small" data-dl-link href="downloads/SwiftSSH-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            </li>
+            <li data-kind="cli-exe">
+              <svg aria-hidden="true"><use href="#i-terminal"/></svg>
+              <div>
+                <h3>Command line for Windows</h3>
+                <p><span data-dl-meta>One file, nothing to install</span> · run <code>swiftssh.exe connect user@host</code></p>
+                <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
+              </div>
+              <a class="btn btn-small" data-dl-link href="downloads/swiftssh-0.1.0-win-x64.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            </li>
+            <li data-kind="cli-portable">
+              <svg aria-hidden="true"><use href="#i-linux"/></svg>
+              <div>
+                <h3>Command line for macOS and Linux</h3>
+                <p><span data-dl-meta>Needs Node.js 18+</span> · run <code>node swiftssh.cjs connect user@host</code></p>
+                <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
+              </div>
+              <a class="btn btn-small" data-dl-link href="downloads/swiftssh-0.1.0.cjs" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            </li>
+            <li class="dl-later">
+              <svg aria-hidden="true"><use href="#i-apple"/></svg>
+              <div><h3>Desktop app for macOS and Linux</h3><p>Not packaged yet. Use the command line above, or build the app from source.</p></div>
+              <a class="btn btn-small" href="https://github.com/Kaeden-Martinson/SwiftSSH#development">Build guide</a>
+            </li>
+          </ul>
+          <p class="dl-note muted" id="dl-note" hidden></p>
+        </div>
       </div>
     </section>
   </main>

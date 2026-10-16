@@ -32,6 +32,47 @@ export function removeHost(name) {
   return true;
 }
 
+/**
+ * Change a saved server: rename it, move it to a group, or update its address or SSH login.
+ * The pinned certificate stays, so a new address must still be the same SwiftSSH server.
+ * Returns the (possibly new) name.
+ */
+export function updateHost(name, changes) {
+  const hosts = loadHosts();
+  const host = hosts[name];
+  if (!host) throw new UserError(`There's no saved host called "${name}".`);
+  const newName = (changes.name ?? name).trim();
+  validateHostName(newName);
+  if (newName !== name && hosts[newName]) throw new UserError(`A server called "${newName}" already exists.`, 'Pick a different name.');
+
+  const updated = { ...host };
+  if (changes.address !== undefined) updated.url = normalizeUrl(changes.address).origin;
+  if (changes.group !== undefined) {
+    const group = String(changes.group || '').trim();
+    if (group.length > 40) throw new UserError('Group names can be at most 40 characters.');
+    if (group) updated.group = group;
+    else delete updated.group;
+  }
+  if (changes.ssh !== undefined) {
+    const ssh = String(changes.ssh || '').trim();
+    if (ssh && !/^(?:[^@\s]+@)?[\w.-]+$/.test(ssh)) throw new UserError(`"${ssh}" isn't a valid SSH login.`, 'Use the form user@hostname.');
+    if (ssh) updated.ssh = ssh;
+    else delete updated.ssh;
+  }
+  if (changes.sshPort !== undefined) {
+    const port = Number(changes.sshPort) || 22;
+    if (port < 1 || port > 65535) throw new UserError('The SSH port must be between 1 and 65535.');
+    if (port === 22) delete updated.sshPort;
+    else updated.sshPort = port;
+  }
+
+  // Rebuild the object so a rename keeps the server's position in the list.
+  const next = {};
+  for (const [key, value] of Object.entries(hosts)) next[key === name ? newName : key] = key === name ? updated : value;
+  writeJson(paths.hosts, next);
+  return newName;
+}
+
 /** "1.2.3.4", "box:7022" or "https://box:7022" -> URL with the default port filled in. */
 export function normalizeUrl(raw) {
   let url;
@@ -64,16 +105,27 @@ export function saveProbedHost(name, probe) {
 export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, ...sshOptions }) {
   validateHostName(name);
   const identity = loadOrCreateIdentity();
-  const ready = await deployOverSsh({ target, sshPort, port, publicKey: identity.publicKeyString, ...sshOptions });
+  const ready = await deployOverSsh({ target, sshPort, port, publicKey: identity.publicKeyString, identityKey: identity.privateKey, ...sshOptions });
   const address = ready.host.includes(':') ? `[${ready.host}]` : ready.host;
-  const host = { url: `https://${address}:${ready.port}`, fingerprint: ready.fingerprint, cert: ready.cert, ssh: target };
+  const existing = loadHosts()[name];
+  // Restarting a saved server keeps its group, and its address if the identity is unchanged
+  // (the user may have edited it, e.g. to a DNS name).
+  const sameServer = existing && existing.fingerprint === ready.fingerprint;
+  const host = {
+    ...(existing || {}),
+    url: sameServer ? existing.url : `https://${address}:${ready.port}`,
+    fingerprint: ready.fingerprint,
+    cert: ready.cert,
+    ssh: target,
+  };
   if (sshPort && Number(sshPort) !== 22) host.sshPort = Number(sshPort);
+  else delete host.sshPort;
   saveHost(name, host);
   sshOptions.onStep?.('Connecting to SwiftSSH');
   let client;
   try {
     client = await connectClient(host, identity);
-    return { host, info: await client.request('GET', '/v1/info') };
+    return { host, info: await client.request('GET', '/v1/info'), autostart: ready.autostart };
   } catch (err) {
     if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message)) {
       throw new UserError(

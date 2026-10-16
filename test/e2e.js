@@ -122,9 +122,18 @@ try {
     );
   }
   await assert.rejects(api.request('POST', '/v1/bundle/read', { body: { root: 'deploy', paths: ['../uploads/big.bin'] } }), (err) => err.status === 400);
-  api.close();
   assert.ok(!fs.existsSync(path.join(files, 'escaped.txt')) && !fs.existsSync(path.join(work, 'escaped.txt')));
   console.log('ok  path traversal rejected');
+
+  // Rename and delete (the app's right-click menu).
+  await api.request('POST', '/v1/rename', { body: { from: 'empty.txt', to: 'renamed.txt' } });
+  assert.ok(fs.existsSync(path.join(files, 'renamed.txt')) && !fs.existsSync(path.join(files, 'empty.txt')));
+  await assert.rejects(api.request('POST', '/v1/rename', { body: { from: 'renamed.txt', to: 'uploads' } }), (err) => err.status === 409);
+  await api.request('POST', '/v1/rm', { body: { path: 'deploy' } });
+  assert.ok(!fs.existsSync(path.join(files, 'deploy')));
+  await assert.rejects(api.request('POST', '/v1/rm', { body: { path: '.' } }), (err) => err.status === 400); // the server's root
+  api.close();
+  console.log('ok  rename and delete, root protected');
 
   // A key the server never authorized must be rejected.
   ok(strangerHome, 'keygen');

@@ -1,12 +1,13 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { connectClient } from './core/client.js';
-import { loadHosts } from './core/config.js';
+import { loadHosts, paths, readJson, writeJson } from './core/config.js';
 import { explainError } from './core/errors.js';
-import { deployHost, getHostOrExplain, probeHost, removeHost, saveProbedHost, validateHostName } from './core/hosts.js';
+import { deployHost, getHostOrExplain, probeHost, removeHost, saveProbedHost, updateHost, validateHostName } from './core/hosts.js';
 import { keyFingerprint, loadOrCreateIdentity } from './core/keys.js';
 import { openChannel } from './core/shell.js';
 import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js';
@@ -83,6 +84,7 @@ handle('hosts:list', () =>
     address: new URL(h.url).host,
     ssh: h.ssh || null,
     sshPort: h.sshPort || null,
+    group: h.group || null,
   })),
 );
 
@@ -101,12 +103,18 @@ handle('hosts:trust', (name, url) => {
   dropClient(name);
 });
 
+const savedPort = (name) => {
+  const host = loadHosts()[name];
+  return host ? Number(new URL(host.url).port) || undefined : undefined;
+};
+
 handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
   dropClient(name);
   const { info } = await deployHost({
     name,
     target,
     sshPort: sshPort || undefined,
+    port: savedPort(name),
     // Used for this one login (and sudo, if Node.js must be installed). Never stored.
     password: password || undefined,
     bundlePath: path.join(dirname, 'core', 'swiftssh.cjs'),
@@ -115,6 +123,16 @@ handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
     onStep: (text) => send('deploy:step', { name, text }),
   });
   return info;
+});
+
+handle('hosts:update', (name, changes) => {
+  const newName = updateHost(name, changes);
+  if (newName !== name) {
+    dropClient(name);
+    renameInState(name, newName);
+  }
+  dropClient(newName); // the address may have changed
+  return newName;
 });
 
 handle('hosts:remove', (name) => {
@@ -129,6 +147,67 @@ handle('hosts:info', (name) => withClient(name, (c) => c.request('GET', '/v1/inf
 
 handle('fs:ls', (name, dir) => withClient(name, (c) => c.request('GET', '/v1/ls', { query: { path: dir || '.' } })));
 handle('fs:mkdir', (name, dir) => withClient(name, (c) => c.request('POST', '/v1/mkdir', { body: { path: dir } })));
+handle('fs:rename', (name, from, to) => withClient(name, (c) => c.request('POST', '/v1/rename', { body: { from, to } })));
+handle('fs:rm', (name, p) => withClient(name, (c) => c.request('POST', '/v1/rm', { body: { path: p } })));
+
+// ---- this computer's files (the left pane) -----------------------------------
+
+const DRIVES = '::drives'; // Windows "This PC": the list of drive letters
+
+function listDrives() {
+  const entries = [];
+  for (let c = 65; c <= 90; c++) {
+    const root = `${String.fromCharCode(c)}:\\`;
+    if (fs.existsSync(root)) entries.push({ name: root, path: root, isDirectory: true, size: 0, mtime: 0 });
+  }
+  return { path: DRIVES, label: 'This PC', parent: null, entries };
+}
+
+handle('local:ls', async (dir) => {
+  if (dir === DRIVES) return listDrives();
+  const target = path.resolve(dir || app.getPath('home'));
+  const names = await fsp.readdir(target, { withFileTypes: true }).catch((err) => {
+    throw Object.assign(new Error(`Can't open ${target}`), { code: err.code, path: target });
+  });
+  const entries = [];
+  for (const ent of names) {
+    const full = path.join(target, ent.name);
+    const st = await fsp.stat(full).catch(() => null);
+    if (!st) continue; // unreadable or broken link
+    entries.push({ name: ent.name, path: full, isDirectory: st.isDirectory(), size: st.size, mtime: st.mtimeMs });
+  }
+  entries.sort((a, b) => b.isDirectory - a.isDirectory || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const parent = path.dirname(target);
+  return { path: target, parent: parent !== target ? parent : process.platform === 'win32' ? DRIVES : null, entries };
+});
+
+handle('local:open', (p) => shell.openPath(p));
+handle('local:rename', async (from, to) => {
+  if (await fsp.stat(to).catch(() => null)) throw new Error(`Something called ${path.basename(to)} is already there.`);
+  await fsp.rename(from, to);
+});
+handle('local:trash', (p) => shell.trashItem(p)); // Recycle Bin, so a local delete can be undone
+handle('local:mkdir', (p) => fsp.mkdir(p, { recursive: true }));
+handle('local:special', () => ({ home: app.getPath('home'), downloads: app.getPath('downloads'), desktop: app.getPath('desktop'), drives: process.platform === 'win32' ? DRIVES : null }));
+
+// ---- remembered app state: open tabs, last folders, upload destinations ------
+
+const STATE_FILE = path.join(paths.dir, 'app-state.json');
+const loadState = () => readJson(STATE_FILE, {});
+function renameInState(from, to) {
+  const st = loadState();
+  st.openTabs = (st.openTabs || []).map((n) => (n === from ? to : n));
+  if (st.activeTab === from) st.activeTab = to;
+  if (st.remoteCwd?.[from]) (st.remoteCwd[to] = st.remoteCwd[from]), delete st.remoteCwd[from];
+  if (st.uploadSpots?.[from]) (st.uploadSpots[to] = st.uploadSpots[from]), delete st.uploadSpots[from];
+  writeJson(STATE_FILE, st);
+}
+handle('state:get', () => loadState());
+handle('state:set', (patch) => {
+  const st = { ...loadState(), ...patch };
+  writeJson(STATE_FILE, st);
+  return st;
+});
 
 handle('dialog:pick', async (kind) => {
   const result = await dialog.showOpenDialog(win, {
@@ -201,10 +280,12 @@ handle('transfer:upload', async (name, localPaths, remoteDir) => {
   });
 });
 
-handle('transfer:download', async (name, remoteItems) => {
+handle('transfer:download', async (name, remoteItems, targetDir) => {
   getHostOrExplain(name);
   // SWIFTSSH_DOWNLOAD_DIR skips the folder picker (used by automated UI checks).
-  const choice = !app.isPackaged && process.env.SWIFTSSH_DOWNLOAD_DIR
+  const choice = targetDir
+    ? { canceled: false, filePaths: [targetDir] }
+    : !app.isPackaged && process.env.SWIFTSSH_DOWNLOAD_DIR
     ? { canceled: false, filePaths: [process.env.SWIFTSSH_DOWNLOAD_DIR] }
     : await dialog.showOpenDialog(win, {
         title: 'Download to…',
@@ -232,6 +313,74 @@ handle('transfer:download', async (name, remoteItems) => {
       return path.join(localDir, remoteBasename(remoteItems[0].path));
     },
   });
+});
+
+// ---- health: notice a stopped SwiftSSH and restart it over SSH ---------------
+
+const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30 };
+const settings = () => ({ ...DEFAULT_SETTINGS, ...(loadState().settings || {}) });
+const healing = new Map(); // name -> { busy, last }
+const HEAL_COOLDOWN_MS = 120_000;
+
+async function checkHealth(name) {
+  try {
+    const info = await withClient(name, (c) => c.request('GET', '/v1/info', { timeout: 8000 }));
+    send('health', { name, status: 'up', info });
+    return true;
+  } catch (err) {
+    const host = loadHosts()[name];
+    const stopped = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message);
+    send('health', { name, status: 'down', error: explainForApp(err, name) });
+    if (stopped && host?.ssh && settings().autoHeal) heal(name);
+    return false;
+  }
+}
+
+/** Log in with this computer's key (authorized at setup) and start SwiftSSH again. Never asks for a password. */
+async function heal(name) {
+  const st = healing.get(name) || { busy: false, last: 0 };
+  if (st.busy || Date.now() - st.last < HEAL_COOLDOWN_MS) return;
+  st.busy = true;
+  st.last = Date.now();
+  healing.set(name, st);
+  send('health', { name, status: 'healing' });
+  try {
+    const host = loadHosts()[name];
+    dropClient(name);
+    const { info } = await deployHost({
+      name,
+      target: host.ssh,
+      sshPort: host.sshPort,
+      port: savedPort(name),
+      bundlePath: path.join(dirname, 'core', 'swiftssh.cjs'),
+      confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
+    });
+    send('health', { name, status: 'healed', info });
+  } catch (err) {
+    send('health', { name, status: 'heal-failed', error: explainForApp(err, name) });
+  } finally {
+    st.busy = false;
+  }
+}
+
+let healthTimer = null;
+let healthRound = 0;
+function scheduleHealth() {
+  clearTimeout(healthTimer);
+  healthTimer = setTimeout(async () => {
+    healthRound++;
+    const hosts = Object.keys(loadHosts());
+    const open = new Set(loadState().openTabs || []);
+    // Open servers every round; the rest every fifth round.
+    const due = hosts.filter((n) => open.has(n) || healthRound % 5 === 0);
+    await Promise.all(due.map((n) => checkHealth(n).catch(() => {})));
+    scheduleHealth();
+  }, Math.max(10, Number(settings().healthInterval) || 30) * 1000);
+}
+handle('health:check', (name) => checkHealth(name));
+handle('health:heal', async (name) => {
+  healing.delete(name); // a manual request skips the cooldown
+  await heal(name);
 });
 
 // ---- terminals --------------------------------------------------------------
@@ -283,6 +432,10 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.on('app-command', (_e, command) => {
+    if (command === 'browser-backward') send('nav', 'back');
+    if (command === 'browser-forward') send('nav', 'forward');
+  });
   win.loadFile(path.join(dirname, 'renderer', 'index.html'));
 
   // Headless screenshot mode, used to check the UI during development:
@@ -301,7 +454,10 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  scheduleHealth();
+});
 app.on('window-all-closed', () => {
   for (const c of clients.values()) c.close();
   app.quit();

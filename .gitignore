@@ -5,3 +5,5 @@ app/core/
 app/dist/
 superpowers/
 dist/
+site/downloads/
+app/release/

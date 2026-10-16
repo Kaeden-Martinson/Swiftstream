@@ -8,136 +8,231 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-prompt" viewBox="0 0 24 24"><path d="M4.5 6.5L10 12l-5.5 5.5M12.5 17.5h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20l1-4.5L15.5 5a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L8.5 19z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="currentColor"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 10.5v5M9.5 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 3.5V8H18" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="12" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pc" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 20h7M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="16" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="7.5" r="1.1" fill="currentColor"/><circle cx="8" cy="16.5" r="1.1" fill="currentColor"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h3.5l2 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 12l9-9M17 6l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.8 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="9.8" r="2.3" fill="currentColor"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="6.2" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11v5.5M14 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M19.5 4.5L11 13M17.5 14v4.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1H10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5v5.5M12 16.2v.3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  </svg>
+
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l5 5-5 5M11 17h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>SwiftSSH</span>
+    <header class="tabbar">
+      <button class="hometab" id="tab-home" type="button"><svg aria-hidden="true"><use href="#i-grid"/></svg>Servers</button>
+      <div class="open-tabs" id="open-tabs" role="tablist" aria-label="Open servers"></div>
+      <button class="icon-btn tab-new" id="tab-new" type="button" title="Add a server" aria-label="Add a server"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
+      <span class="tabbar-gap"></span>
+      <button class="hometab settings-tab" id="tab-settings" type="button"><svg aria-hidden="true"><use href="#i-gear"/></svg>Settings</button>
+    </header>
+
+    <!-- Servers home: search, groups, cards -->
+    <section class="home" id="home">
+      <div class="home-top">
+        <form class="search" id="search-form" role="search">
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="search" placeholder="Search servers, or type user@host to set up a new one" autocomplete="off" spellcheck="false" aria-label="Search servers">
+          <button class="btn btn-small" type="submit" id="search-go">Connect</button>
+        </form>
+        <button class="btn btn-primary" id="new-host" type="button"><svg aria-hidden="true"><use href="#i-plus"/></svg>New server</button>
       </div>
-      <div class="sidebar-label">Servers</div>
-      <ul id="host-list" class="host-list"></ul>
-      <button id="add-host" class="btn btn-quiet add-host">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        Add server
-      </button>
-      <div class="sidebar-foot">
-        <button id="show-key" class="btn btn-quiet">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 12l9-9M17 6l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          Your key
-        </button>
+      <div class="groups" id="groups"></div>
+      <div class="home-empty" id="home-empty" hidden>
+        <h1>Connect your first server</h1>
+        <p>Type an SSH login above, like <code>ubuntu@203.0.113.7</code>, and press Connect. SwiftSSH logs in once with your password or SSH key, installs itself, and remembers the server.</p>
+        <button class="btn btn-primary" id="empty-add" type="button">Add a server</button>
       </div>
-    </aside>
+      <p class="no-results muted" id="no-results" hidden></p>
+    </section>
 
-    <main class="main">
-      <section id="empty" class="empty">
-        <div class="empty-inner">
-          <h1>Connect your first server</h1>
-          <p>SwiftSSH gives you a terminal and fast file transfers to your servers. Uploads and downloads go over HTTPS on several connections at once, and unchanged files are skipped.</p>
-          <button id="empty-add" class="btn btn-primary">Add a server</button>
-          <ol class="how">
-            <li><span><b>Log in with SSH once.</b> SwiftSSH starts itself on the server and remembers it.</span></li>
-            <li><span><b>Open a terminal or browse files.</b> Drag files in to upload them.</span></li>
-          </ol>
+    <!-- One server: terminal and files -->
+    <section class="workspace" id="workspace" hidden>
+      <header class="ws-head">
+        <div class="ws-title">
+          <span class="dot" id="ws-dot"></span>
+          <div class="ws-titles"><h1 id="ws-name"></h1><div class="muted" id="ws-sub"></div></div>
         </div>
-      </section>
+        <nav class="seg" role="tablist" aria-label="View">
+          <button type="button" role="tab" data-view="terminal"><svg aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</button>
+          <button type="button" role="tab" data-view="files"><svg aria-hidden="true"><use href="#i-files"/></svg>Files</button>
+        </nav>
+        <button class="btn btn-quiet btn-small" id="ws-edit" type="button"><svg aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button>
+      </header>
 
-      <section id="host-view" class="host-view" hidden>
-        <header class="host-head">
-          <div class="host-title">
-            <h1 id="host-name"></h1>
-            <div id="host-sub" class="muted"></div>
-          </div>
-          <nav class="tabs" role="tablist">
-            <button class="tab" data-tab="terminal" role="tab">Terminal</button>
-            <button class="tab" data-tab="files" role="tab">Files</button>
-          </nav>
-          <button id="remove-host" class="btn btn-quiet btn-small" title="Remove this server from SwiftSSH">Remove</button>
-        </header>
-
-        <div id="banner" class="banner" hidden>
-          <div>
-            <div id="banner-message" class="banner-message"></div>
-            <div id="banner-hint" class="banner-hint"></div>
-          </div>
-          <div class="banner-actions">
-            <button id="banner-action" class="btn btn-primary btn-small" hidden></button>
-            <button id="banner-retry" class="btn btn-small">Try again</button>
-          </div>
+      <div class="banner" id="banner" hidden>
+        <div><div class="banner-message" id="banner-message"></div><div class="banner-hint" id="banner-hint"></div></div>
+        <div class="banner-actions">
+          <button class="btn btn-primary btn-small" id="banner-action" type="button" hidden></button>
+          <button class="btn btn-small" id="banner-retry" type="button">Try again</button>
         </div>
+      </div>
 
-        <div id="terminal-pane" class="pane terminal-pane"></div>
+      <div class="pane terminal-pane" id="terminal-pane"></div>
 
-        <div id="files-pane" class="pane files-pane" hidden>
-          <div class="toolbar">
-            <button id="files-up" class="icon-btn" title="Up one folder">
-              <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <button id="files-home" class="icon-btn" title="Home folder">
-              <svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-            </button>
-            <div id="crumbs" class="crumbs"></div>
-            <button id="files-refresh" class="icon-btn" title="Refresh">
-              <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <span class="toolbar-gap"></span>
-            <button id="files-mkdir" class="btn btn-small">New folder</button>
-            <button id="files-upload" class="btn btn-small">Upload files</button>
-            <button id="files-upload-dir" class="btn btn-small">Upload folder</button>
-            <button id="files-download" class="btn btn-primary btn-small" disabled>Download</button>
+      <div class="pane files-pane" id="files-pane" hidden>
+        <section class="fpane" id="local-pane" data-side="local" aria-label="This computer">
+          <div class="fp-head">
+            <span class="fp-title"><svg aria-hidden="true"><use href="#i-pc"/></svg>This computer</span>
+            <span class="fp-gap"></span>
+            <label class="fp-filter"><svg aria-hidden="true"><use href="#i-search"/></svg><input data-part="filter" placeholder="Filter" aria-label="Filter this folder" spellcheck="false"></label>
+            <button class="btn btn-small" type="button" data-act="upload" title="Upload the selected items to the server folder on the right"><svg aria-hidden="true"><use href="#i-arrow-right"/></svg>Upload</button>
           </div>
-          <div id="file-area" class="file-area">
-            <table class="file-table">
-              <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th></tr></thead>
-              <tbody id="file-rows"></tbody>
-            </table>
-            <div id="files-empty" class="files-empty" hidden>This folder is empty. Drop files here to upload them.</div>
-            <div id="drop-overlay" class="drop-overlay" hidden><div>Drop to upload to <b id="drop-target"></b></div></div>
+          <div class="fp-nav">
+            <button class="icon-btn" type="button" data-act="back" title="Back (Alt+Left, mouse back)" aria-label="Back"><svg aria-hidden="true"><use href="#i-left"/></svg></button>
+            <button class="icon-btn" type="button" data-act="forward" title="Forward (Alt+Right, mouse forward)" aria-label="Forward"><svg aria-hidden="true"><use href="#i-right"/></svg></button>
+            <button class="icon-btn" type="button" data-act="up" title="Up one folder (Backspace)" aria-label="Up one folder"><svg aria-hidden="true"><use href="#i-up"/></svg></button>
+            <div class="crumbs" data-part="crumbs" title="Click to type a path (Ctrl+L)"></div>
+            <button class="icon-btn" type="button" data-act="refresh" title="Refresh" aria-label="Refresh"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
           </div>
-        </div>
-      </section>
-    </main>
+          <div class="fp-list" data-part="list" tabindex="0">
+            <table class="ftable"><thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th></tr></thead><tbody></tbody></table>
+            <div class="fp-empty muted" data-part="empty" hidden></div>
+            <div class="fp-drop" data-part="drop" hidden></div>
+          </div>
+          <div class="fp-foot muted" data-part="foot"></div>
+        </section>
+
+        <section class="fpane" id="remote-pane" data-side="remote" aria-label="Server">
+          <div class="fp-head">
+            <span class="fp-title"><svg aria-hidden="true"><use href="#i-server"/></svg><span data-part="title">Server</span></span>
+            <span class="fp-gap"></span>
+            <label class="fp-filter"><svg aria-hidden="true"><use href="#i-search"/></svg><input data-part="filter" placeholder="Filter" aria-label="Filter this folder" spellcheck="false"></label>
+            <button class="icon-btn" type="button" data-act="mkdir" title="New folder" aria-label="New folder"><svg aria-hidden="true"><use href="#i-folder-plus"/></svg></button>
+            <button class="btn btn-small" type="button" data-act="download" title="Download the selected items to the folder on the left"><svg aria-hidden="true"><use href="#i-arrow-left"/></svg>Download</button>
+          </div>
+          <div class="fp-nav">
+            <button class="icon-btn" type="button" data-act="back" title="Back (Alt+Left, mouse back)" aria-label="Back"><svg aria-hidden="true"><use href="#i-left"/></svg></button>
+            <button class="icon-btn" type="button" data-act="forward" title="Forward (Alt+Right, mouse forward)" aria-label="Forward"><svg aria-hidden="true"><use href="#i-right"/></svg></button>
+            <button class="icon-btn" type="button" data-act="up" title="Up one folder (Backspace)" aria-label="Up one folder"><svg aria-hidden="true"><use href="#i-up"/></svg></button>
+            <div class="crumbs" data-part="crumbs" title="Click to type a path (Ctrl+L)"></div>
+            <button class="icon-btn" type="button" data-act="home" title="Home folder" aria-label="Home folder"><svg aria-hidden="true"><use href="#i-home"/></svg></button>
+            <button class="icon-btn" type="button" data-act="refresh" title="Refresh" aria-label="Refresh"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
+          </div>
+          <div class="spot-hint" data-part="hint" hidden></div>
+          <div class="fp-list" data-part="list" tabindex="0">
+            <table class="ftable"><thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th></tr></thead><tbody></tbody></table>
+            <div class="fp-empty muted" data-part="empty" hidden></div>
+            <div class="fp-drop" data-part="drop" hidden></div>
+          </div>
+          <div class="fp-foot muted" data-part="foot"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="settings" id="settings" hidden>
+      <div class="settings-inner">
+        <h1>Settings</h1>
+
+        <section class="set-group">
+          <h2>Server health</h2>
+          <label class="set-row">
+            <span><b>Restart SwiftSSH automatically</b><small>If a server reboots or SwiftSSH stops, the app logs in over SSH with this computer's key and starts it again, then reconnects your terminal. Works for servers set up with an SSH login.</small></span>
+            <input type="checkbox" class="switch" id="set-autoheal">
+          </label>
+          <label class="set-row">
+            <span><b>Check servers every</b><small>Open tabs are checked this often; other servers less often.</small></span>
+            <select id="set-interval"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option></select>
+          </label>
+        </section>
+
+        <section class="set-group">
+          <h2>Files</h2>
+          <label class="set-row">
+            <span><b>Show hidden files</b><small>Files and folders whose names start with a dot.</small></span>
+            <input type="checkbox" class="switch" id="set-hidden">
+          </label>
+          <label class="set-row">
+            <span><b>Ask before moving files to the Recycle Bin</b><small>Deleting on a server always asks, because it can't be undone.</small></span>
+            <input type="checkbox" class="switch" id="set-confirm-delete">
+          </label>
+        </section>
+
+        <section class="set-group">
+          <div class="set-head">
+            <h2>Right-click actions</h2>
+            <span class="fp-gap"></span>
+            <button class="btn btn-quiet btn-small" id="reset-actions" type="button">Restore examples</button>
+            <button class="btn btn-small" id="add-action" type="button"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add action</button>
+          </div>
+          <p class="muted set-help">Commands that show up when you right-click a server, a folder or a file on a server. They run in that server's terminal. Use <code>{path}</code>, <code>{name}</code>, <code>{dir}</code> and <code>{host}</code>; paths are quoted for you.</p>
+          <div class="action-list" id="action-list"></div>
+          <p class="muted" id="action-empty" hidden>No actions yet. Add one, or restore the examples.</p>
+        </section>
+
+        <section class="set-group">
+          <h2>This computer</h2>
+          <div class="set-row">
+            <span><b>Your key</b><small>Fingerprint <span id="set-fingerprint" class="mono"></span></small></span>
+            <button class="btn btn-small" id="set-show-key" type="button"><svg aria-hidden="true"><use href="#i-key"/></svg>Show key</button>
+          </div>
+        </section>
+      </div>
+    </section>
   </div>
 
-  <div id="transfers" class="transfers" aria-live="polite"></div>
+  <div class="transfers" id="transfers" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <dialog id="add-dialog" class="dialog">
+  <!-- Add a server -->
+  <dialog class="dialog" id="add-dialog">
     <form method="dialog" class="dialog-body" id="add-form" novalidate>
       <h2>Add a server</h2>
       <div class="segmented" role="radiogroup">
-        <label><input type="radio" name="mode" value="ssh" checked><span>I can log in with SSH</span></label>
+        <label><input type="radio" name="mode" value="ssh" checked><span>I have an SSH login</span></label>
         <label><input type="radio" name="mode" value="direct"><span>SwiftSSH is already running</span></label>
       </div>
-
       <div data-mode="ssh">
         <p class="muted">SwiftSSH logs in once, installs itself on the server (and Node.js if it's missing), and remembers it. Your password is used only for this login and is never saved.</p>
         <label class="field"><span>SSH login</span><input name="target" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
         <label class="field"><span>Password <small class="muted">leave empty to use your SSH key</small></span><input name="password" type="password" autocomplete="off"></label>
         <div class="field-row">
           <label class="field"><span>Name</span><input name="name" placeholder="prod" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Group <small class="muted">optional</small></span><input name="group" list="group-options" placeholder="Production" autocomplete="off"></label>
           <label class="field narrow"><span>SSH port</span><input name="sshPort" placeholder="22" inputmode="numeric"></label>
         </div>
       </div>
-
       <div data-mode="direct" hidden>
         <p class="muted">Use this if you ran <code>swiftssh serve</code> on the server yourself.</p>
         <label class="field"><span>Address</span><input name="address" placeholder="192.168.1.20 or box.example.com:7022" autocomplete="off" spellcheck="false"></label>
         <label class="field"><span>Name</span><input name="directName" placeholder="home-server" autocomplete="off" spellcheck="false"></label>
       </div>
-
-      <div id="add-trust" class="trust" hidden>
+      <div class="trust" id="add-trust" hidden>
         <p>The server's fingerprint is:</p>
-        <code id="add-fingerprint" class="fingerprint"></code>
+        <code class="fingerprint" id="add-fingerprint"></code>
         <p class="muted">Check that it matches the fingerprint <code>swiftssh serve</code> printed on the server. If it doesn't, someone may be intercepting the connection.</p>
       </div>
-
-      <div id="add-authorize" class="trust" hidden>
+      <div class="trust" id="add-authorize" hidden>
         <p><b>One more step.</b> Allow this computer by running this on the server:</p>
         <div class="copy-box"><code id="add-authorize-cmd"></code><button type="button" class="btn btn-small" data-copy="add-authorize-cmd">Copy</button></div>
       </div>
-
-      <div id="add-error" class="form-error" hidden></div>
-      <div id="add-progress" class="form-progress" hidden><span class="spinner"></span><span id="add-progress-text"></span></div>
-
+      <div class="form-error" id="add-error" hidden></div>
+      <div class="form-progress" id="add-progress" hidden><span class="spinner"></span><span id="add-progress-text"></span></div>
       <div class="dialog-actions">
         <button type="button" class="btn" id="add-cancel">Cancel</button>
         <button type="submit" class="btn btn-primary" id="add-submit">Set up server</button>
@@ -145,7 +240,48 @@
     </form>
   </dialog>
 
-  <dialog id="key-dialog" class="dialog">
+  <!-- Edit a server -->
+  <dialog class="dialog" id="edit-dialog">
+    <form method="dialog" class="dialog-body" id="edit-form" novalidate>
+      <h2 id="edit-title">Edit server</h2>
+      <div class="field-row">
+        <label class="field"><span>Name</span><input name="name" autocomplete="off" spellcheck="false" required></label>
+        <label class="field"><span>Group <small class="muted">optional</small></span><input name="group" list="group-options" placeholder="Production" autocomplete="off"></label>
+      </div>
+      <label class="field"><span>SwiftSSH address</span><input name="address" autocomplete="off" spellcheck="false"></label>
+      <div class="field-row">
+        <label class="field"><span>SSH login <small class="muted">used to restart SwiftSSH</small></span><input name="ssh" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
+        <label class="field narrow"><span>SSH port</span><input name="sshPort" placeholder="22" inputmode="numeric"></label>
+      </div>
+      <p class="muted small">The server's identity stays pinned, so a new address must point at the same SwiftSSH server.</p>
+      <div class="form-error" id="edit-error" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger-quiet" id="edit-remove">Remove server</button>
+        <span class="fp-gap"></span>
+        <button type="button" class="btn" id="edit-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <datalist id="group-options"></datalist>
+
+  <!-- Upload destination choice -->
+  <dialog class="dialog" id="dest-dialog">
+    <form method="dialog" class="dialog-body" id="dest-form">
+      <h2 id="dest-title">Upload to…</h2>
+      <button type="button" class="dest-option recommended" id="dest-remembered">
+        <svg aria-hidden="true"><use href="#i-pin"/></svg>
+        <span><b data-part="path"></b><small data-part="why"></small></span>
+      </button>
+      <button type="button" class="dest-option" id="dest-current">
+        <svg aria-hidden="true"><use href="#i-folder"/></svg>
+        <span><b data-part="path"></b><small>The folder you dropped on</small></span>
+      </button>
+      <div class="dialog-actions"><button type="button" class="btn" id="dest-cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="key-dialog">
     <form method="dialog" class="dialog-body">
       <h2>Your key</h2>
       <p class="muted">This computer's public key. Servers allow you in by adding it with <code>swiftssh authorize</code>. SwiftSSH does this for you when you set a server up over SSH.</p>
@@ -155,7 +291,7 @@
     </form>
   </dialog>
 
-  <dialog id="prompt-dialog" class="dialog">
+  <dialog class="dialog" id="prompt-dialog">
     <form method="dialog" class="dialog-body" id="prompt-form">
       <h2 id="prompt-title"></h2>
       <p id="prompt-text" class="muted"></p>
@@ -169,6 +305,16 @@
 
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
-  <script src="renderer.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/dialogs.js"></script>
+  <script src="js/contextmenu.js"></script>
+  <script src="js/transfers.js"></script>
+  <script src="js/terminal.js"></script>
+  <script src="js/files.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/home.js"></script>
+  <script src="js/workspace.js"></script>
+  <script src="js/health.js"></script>
+  <script src="js/start.js"></script>
 </body>
 </html>

@@ -45,7 +45,17 @@ function startSshServer(port, hostKey) {
         user = account;
         return ctx.accept();
       }
-      ctx.reject(['password']);
+      // Key login against the account's ~/.ssh/authorized_keys, like sshd.
+      if (ctx.method === 'publickey' && account) {
+        const file = path.join(account.home, '.ssh', 'authorized_keys');
+        const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+        const match = lines.map((l) => ssh2.utils.parseKey(l)).find((k) => !(k instanceof Error) && k.getPublicSSH().equals(ctx.key.data));
+        if (match && (!ctx.signature || match.verify(ctx.blob, ctx.signature, ctx.hashAlgo))) {
+          user = account;
+          return ctx.accept();
+        }
+      }
+      ctx.reject(['password', 'publickey']);
     });
     client.on('session', (accept) => {
       accept().on('exec', (acceptExec, _reject, info) => {
@@ -121,10 +131,22 @@ try {
   assert.ok(fs.readFileSync(path.join(users.tester.home, 'payload.bin')).equals(fs.readFileSync(file)));
   console.log('ok  exec and push over the new connection');
 
-  // Second run: same bundle already there and running, so no upload.
-  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: 's3cret\n' });
+  // Setup authorized this computer's key for SSH, so a restart needs no password at all.
+  const authorized = fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8');
+  assert.match(authorized, /^ssh-ed25519 \S+ swiftssh@/m);
+  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' });
   assert.doesNotMatch(r.err, /Uploading SwiftSSH/);
-  console.log('ok  re-running setup skips the upload');
+  assert.equal(fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8'), authorized); // not added twice
+  console.log('ok  restart over SSH with no password, no re-upload');
+
+  // A stopped server comes back with the same key login (what the app's auto-restart does).
+  stopRemote(users.tester);
+  r = await run(['exec', 'box', '--', 'echo', 'down']);
+  assert.notEqual(r.code, 0);
+  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' });
+  r = await ok(['exec', 'box', '--', 'echo', 'back-up']);
+  assert.match(r.out, /back-up/);
+  console.log('ok  stopped server restarted with the key, no password');
 
   // The standalone executable uploads the copy embedded in itself.
   if (fs.existsSync(exe)) {

@@ -33,6 +33,48 @@ export function normalizePublicKey(line) {
   return line.trim().split(/\s+/).slice(0, 2).join(' ');
 }
 
+// ---- the same Ed25519 key in OpenSSH formats (for logging in over SSH without a password) ----
+
+const sshString = (buf) => {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(b.length);
+  return Buffer.concat([len, b]);
+};
+
+const rawKeyParts = (privateKey) => {
+  const jwk = privateKey.export({ format: 'jwk' });
+  return { seed: Buffer.from(jwk.d, 'base64url'), pub: Buffer.from(jwk.x, 'base64url') };
+};
+
+/** "ssh-ed25519 AAAA... comment", for a server's ~/.ssh/authorized_keys. */
+export function sshPublicKeyLine(privateKey, comment = 'swiftssh') {
+  const { pub } = rawKeyParts(privateKey);
+  return `ssh-ed25519 ${Buffer.concat([sshString('ssh-ed25519'), sshString(pub)]).toString('base64')} ${comment}`;
+}
+
+/** The private key as an unencrypted "OPENSSH PRIVATE KEY" block (openssh-key-v1), which ssh2 can read. */
+export function sshPrivateKeyPem(privateKey, comment = 'swiftssh') {
+  const { seed, pub } = rawKeyParts(privateKey);
+  const publicBlob = Buffer.concat([sshString('ssh-ed25519'), sshString(pub)]);
+  const check = crypto.randomBytes(4);
+  let secret = Buffer.concat([check, check, sshString('ssh-ed25519'), sshString(pub), sshString(Buffer.concat([seed, pub])), sshString(comment)]);
+  const pad = [];
+  for (let i = 1; (secret.length + pad.length) % 8 !== 0; i++) pad.push(i);
+  secret = Buffer.concat([secret, Buffer.from(pad)]);
+  const body = Buffer.concat([
+    Buffer.from('openssh-key-v1\0'),
+    sshString('none'),
+    sshString('none'),
+    sshString(''),
+    Buffer.from([0, 0, 0, 1]),
+    sshString(publicBlob),
+    sshString(secret),
+  ]);
+  const b64 = body.toString('base64').match(/.{1,70}/g).join('\n');
+  return `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----\n`;
+}
+
 export function keyFingerprint(line) {
   const b64 = normalizePublicKey(line).split(' ')[1];
   const digest = crypto.createHash('sha256').update(Buffer.from(b64, 'base64')).digest('base64');

@@ -355,3 +355,15 @@ h3 { font-size: var(--fs-md); font-weight: 500; line-height: 1.35; }
 }
 .nav-toggle .when-open, .nav.open .nav-toggle .when-closed { display: none; }
 .nav.open .nav-toggle .when-open { display: block; animation: pop .25s var(--ease); }
+
+/* ---------- downloads ---------- */
+.dl-release { font-size: 13px; margin-top: 18px; }
+.dl-release a { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--line-3); text-underline-offset: 3px; }
+.dl-release a:hover { color: var(--text); }
+.platforms code { font-size: 12px; white-space: nowrap; }
+.dl-sum { display: inline-flex; margin-top: 6px; padding: 2px 8px; border: 1px solid var(--line-2); border-radius: 5px; background: transparent; color: var(--faint); font: 11.5px var(--mono); cursor: pointer; transition: color .15s, border-color .15s; }
+.dl-sum:hover { color: var(--text-2); border-color: var(--line-3); }
+.dl-sum[data-copy]::after { display: none; }
+.platforms li.unavailable .btn { opacity: 0.45; pointer-events: none; }
+.platforms li.dl-later h3 { color: var(--text-2); }
+.dl-note { font-size: 13px; margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--line-3); border-radius: 8px; }

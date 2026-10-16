@@ -6,6 +6,7 @@ import path from 'node:path';
 import ssh2 from 'ssh2';
 import { DEFAULT_PORT, paths, readJson, writeJson } from './config.js';
 import { UserError } from './errors.js';
+import { sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
 import { loadServerBundle } from './self.js';
 
 const { Client, utils } = ssh2;
@@ -29,6 +30,8 @@ export async function deployOverSsh({
   sshPort = 22,
   port = DEFAULT_PORT,
   publicKey,
+  identityKey, // this computer's private key: tried for SSH login, and authorized for SSH so restarts need no password
+  authorizeSsh = true,
   password,
   askPassword,
   confirmHostKey = async () => true,
@@ -41,7 +44,8 @@ export async function deployOverSsh({
   const bundleSha = crypto.createHash('sha256').update(bundle).digest('hex');
 
   onStep(`Connecting to ${host}`);
-  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey });
+  const ownKey = identityKey ? sshPrivateKeyPem(identityKey) : null;
+  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey, ownKey });
   try {
     onStep('Checking the server');
     const facts = await probe(session);
@@ -67,7 +71,25 @@ export async function deployOverSsh({
     if (!line) {
       throw new UserError(`SwiftSSH didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftssh/server.log on the server.');
     }
-    return { ...parseReadyLine(line), host };
+    const ready = { ...parseReadyLine(line), host };
+
+    if (identityKey && authorizeSsh) {
+      // Let this computer log in over SSH with its SwiftSSH key, so a stopped server can be
+      // restarted automatically without asking for a password. Same access the key already has.
+      const comment = `swiftssh@${os.hostname().replace(/[^w.-]/g, '') || 'computer'}`;
+      const line = sshPublicKeyLine(identityKey, comment);
+      const keyData = line.split(' ')[1];
+      await run(session, sh(`umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && (grep -qF "${keyData}" "$HOME/.ssh/authorized_keys" || printf '%s\n' "${line}" >> "$HOME/.ssh/authorized_keys")`)).catch(() => {});
+    }
+
+    // Start again after a reboot, where the server allows a user crontab.
+    const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} >/dev/null 2>&1`;
+    const cron = await run(
+      session,
+      sh(`command -v crontab >/dev/null 2>&1 || exit 3; (crontab -l 2>/dev/null | grep -v "swiftssh.cjs\" serve"; echo '${cronLine.replace(/'/g, `'"'"'`)}') | crontab -`),
+    ).catch(() => ({ code: 1 }));
+    ready.autostart = cron.code === 0;
+    return ready;
   } finally {
     session.end();
   }
@@ -118,7 +140,7 @@ function checkReachable(host, port) {
   });
 }
 
-async function sshConnect({ username, host, port, password, askPassword, confirmHostKey }) {
+async function sshConnect({ username, host, port, password, askPassword, confirmHostKey, ownKey }) {
   await checkReachable(host, port);
   const known = readJson(KNOWN_HOSTS, {});
   const hostId = port === 22 ? host : `[${host}]:${port}`;
@@ -127,6 +149,7 @@ async function sshConnect({ username, host, port, password, askPassword, confirm
   // Try keys first (agent, then ~/.ssh), then the password; ask for it only when needed.
   const attempts = [];
   if (process.env.SSH_AUTH_SOCK) attempts.push({ type: 'agent', username, agent: process.env.SSH_AUTH_SOCK });
+  if (ownKey) attempts.push({ type: 'publickey', username, key: ownKey }); // authorized by an earlier setup
   for (const key of localKeys()) attempts.push({ type: 'publickey', username, key });
   const passwordTries = password || !askPassword ? 1 : 3;
   for (let i = 0; i < passwordTries; i++) attempts.push({ type: 'password-slot', attempt: i });

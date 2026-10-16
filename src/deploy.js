@@ -1,67 +1,327 @@
-import { spawn } from 'node:child_process';
-import { DEFAULT_PORT } from './config.js';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import net from 'node:net';
+import path from 'node:path';
+import ssh2 from 'ssh2';
+import { DEFAULT_PORT, paths, readJson, writeJson } from './config.js';
 import { UserError } from './errors.js';
+import { loadServerBundle } from './self.js';
 
+const { Client, utils } = ssh2;
 const READY_PREFIX = 'SWIFTSSH_READY ';
+const REMOTE_BUNDLE = '$HOME/.swiftssh/bin/swiftssh.cjs';
+const KNOWN_HOSTS = path.join(paths.dir, 'ssh_known_hosts.json');
 
 /**
- * Use the user's existing SSH access once to install/start swiftssh on a host, authorize
- * our key there, and learn its certificate. The cert arrives over the already-authenticated
- * SSH channel, so no trust-on-first-use prompt is needed.
+ * Log in to a server over SSH once (key or password), make sure Node.js is there, upload
+ * swiftssh, start it in the background, authorize this computer's key, and return the
+ * server's certificate. The certificate arrives over the authenticated SSH session, so the
+ * client can pin it without a trust-on-first-use prompt.
  *
- * batch: no terminal to ask for passwords (desktop app), so key-based ssh login is required.
+ * Callbacks let the CLI and the desktop app ask the user in their own way:
+ *   askPassword(attempt) -> Promise<string>  (reject to give up)
+ *   confirmHostKey({ host, fingerprint }) -> Promise<boolean>  (first connection to a server)
+ *   onStep(text)  progress messages
  */
-export function deployOverSsh({ target, sshPort, port = DEFAULT_PORT, remoteCmd = 'npx -y swiftssh', publicKey, batch = false }) {
+export async function deployOverSsh({
+  target,
+  sshPort = 22,
+  port = DEFAULT_PORT,
+  publicKey,
+  password,
+  askPassword,
+  confirmHostKey = async () => true,
+  onStep = () => {},
+  bundlePath,
+}) {
   if (!/^swiftssh-ed25519 [A-Za-z0-9+/=]+$/.test(publicKey)) throw new Error('Invalid public key');
-  const command = `${remoteCmd} serve --daemon --port ${Number(port)} --authorize "${publicKey}"`;
-  const args = [
-    ...(batch ? ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=15'] : []),
-    ...(sshPort ? ['-p', String(sshPort)] : []),
-    target,
-    command,
-  ];
+  const { username, host } = parseTarget(target);
+  const bundle = loadServerBundle(bundlePath);
+  const bundleSha = crypto.createHash('sha256').update(bundle).digest('hex');
 
+  onStep(`Connecting to ${host}`);
+  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey });
+  try {
+    onStep('Checking the server');
+    const facts = await probe(session);
+
+    let node = facts.node;
+    if (!node) node = await installNode(session, facts, onStep, session.loginPassword);
+
+    if (facts.bundle_sha !== bundleSha) {
+      onStep('Uploading SwiftSSH');
+      // A different version may be running from an older upload: stop it so the new one starts.
+      if (facts.bundle_sha) await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
+      const up = await run(
+        session,
+        sh(`umask 077 && mkdir -p "$HOME/.swiftssh/bin" && cat > "${REMOTE_BUNDLE}.tmp" && mv "${REMOTE_BUNDLE}.tmp" "${REMOTE_BUNDLE}"`),
+        { stdin: bundle },
+      );
+      if (up.code !== 0) throw new UserError(`Uploading SwiftSSH to ${host} failed.`, up.stderr.trim());
+    }
+
+    onStep('Starting SwiftSSH');
+    const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey}"`));
+    const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX));
+    if (!line) {
+      throw new UserError(`SwiftSSH didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftssh/server.log on the server.');
+    }
+    return { ...parseReadyLine(line), host };
+  } finally {
+    session.end();
+  }
+}
+
+export function parseTarget(target) {
+  const match = /^(?:([^@\s]+)@)?([\w.-]+|\[[0-9a-fA-F:]+\])$/.exec(String(target || '').trim());
+  if (!match) throw new UserError(`"${target}" isn't a valid SSH login.`, 'Use the form user@hostname, like ubuntu@203.0.113.7.');
+  return { username: match[1] || os.userInfo().username, host: match[2].replace(/^\[|\]$/g, '') };
+}
+
+// ---- SSH connection ---------------------------------------------------------
+
+/** Unencrypted private keys from ~/.ssh that ssh2 can use, tried before asking for a password. */
+function localKeys() {
+  const dir = path.join(os.homedir(), '.ssh');
+  const keys = [];
+  for (const name of ['id_ed25519', 'id_ecdsa', 'id_rsa']) {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) continue;
+    const data = fs.readFileSync(file);
+    const parsed = utils.parseKey(data);
+    if (!(parsed instanceof Error)) keys.push(data); // encrypted keys parse as an Error without a passphrase
+  }
+  return keys;
+}
+
+function hostKeyFingerprint(key) {
+  return `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
+}
+
+/** Fail fast (15s) when nothing answers, before the SSH login, which may wait on a person typing. */
+function checkReachable(host, port) {
   return new Promise((resolve, reject) => {
-    // Password prompts go to the tty directly, so stderr can be captured for diagnosis.
-    const child = spawn('ssh', args, { stdio: [batch ? 'ignore' : 'inherit', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => {
-      stdout += d;
-    });
-    child.stderr.on('data', (d) => {
-      stderr += d;
-      if (!batch) process.stderr.write(d);
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      const line = stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX));
-      if (line) return resolve(parseReadyLine(line));
-      reject(explainSshFailure(target, code, `${stderr}\n${stdout}`, batch));
+    const socket = net.connect({ host, port });
+    const fail = (err) => {
+      socket.destroy();
+      if (err.code === 'ECONNREFUSED') reject(new UserError(`No SSH server is answering on ${host}:${port}.`, 'Check the address and SSH port.'));
+      else if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') reject(new UserError(`Can't find a machine called "${host}".`, 'Check the spelling of the address.'));
+      else reject(new UserError(`Connecting to ${host}:${port} timed out.`, 'Check the address, the SSH port, and that the server is online.'));
+    };
+    socket.setTimeout(15_000, () => fail({ code: 'ETIMEDOUT' }));
+    socket.once('error', fail);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve();
     });
   });
 }
 
-function explainSshFailure(target, code, output, batch) {
-  const host = target.split('@').pop();
-  if (/Permission denied|Too many authentication failures/i.test(output)) {
-    return new UserError(
-      `The SSH login to ${target} was refused.`,
-      batch
-        ? `The app logs in with your SSH key (it can't type passwords). Set one up with:\n  ssh-copy-id ${target}\nor use "swiftssh setup" in a terminal.`
-        : 'Check the username and your SSH key or password.',
-    );
+async function sshConnect({ username, host, port, password, askPassword, confirmHostKey }) {
+  await checkReachable(host, port);
+  const known = readJson(KNOWN_HOSTS, {});
+  const hostId = port === 22 ? host : `[${host}]:${port}`;
+  let hostKeyError = null;
+
+  // Try keys first (agent, then ~/.ssh), then the password; ask for it only when needed.
+  const attempts = [];
+  if (process.env.SSH_AUTH_SOCK) attempts.push({ type: 'agent', username, agent: process.env.SSH_AUTH_SOCK });
+  for (const key of localKeys()) attempts.push({ type: 'publickey', username, key });
+  const passwordTries = password || !askPassword ? 1 : 3;
+  for (let i = 0; i < passwordTries; i++) attempts.push({ type: 'password-slot', attempt: i });
+  let next = 0;
+  let lastPasswordUsed = false;
+  let usedPassword = null;
+
+  const authHandler = (methodsLeft, _partial, callback) => {
+    const step = () => {
+      if (next >= attempts.length) return callback(false);
+      const attempt = attempts[next++];
+      const allowed = (m) => !methodsLeft || methodsLeft.includes(m);
+      if (attempt.type !== 'password-slot') return allowed('publickey') ? callback(attempt) : step();
+      if (!allowed('password') && !allowed('keyboard-interactive')) return callback(false);
+      const getPassword = password && attempt.attempt === 0 ? Promise.resolve(password) : askPassword ? askPassword(attempt.attempt) : Promise.reject(new Error('no password'));
+      getPassword.then(
+        (pw) => {
+          lastPasswordUsed = true;
+          usedPassword = pw;
+          if (allowed('password')) callback({ type: 'password', username, password: pw });
+          else callback({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => finish(prompts.map(() => pw)) });
+        },
+        () => callback(false),
+      );
+    };
+    step();
+  };
+
+  return await new Promise((resolve, reject) => {
+    const conn = new Client();
+    conn.on('ready', () => {
+      conn.loginPassword = usedPassword; // reused for sudo if Node.js must be installed
+      resolve(conn);
+    });
+    conn.on('error', (err) => {
+      if (hostKeyError) return reject(hostKeyError);
+      if (err.level === 'client-authentication') {
+        return reject(
+          new UserError(
+            `The SSH login to ${username}@${host} was refused.`,
+            lastPasswordUsed ? 'Check the username and password.' : 'Enter the password for this account, or set up an SSH key for it.',
+          ),
+        );
+      }
+      if (err.level === 'client-timeout') return reject(new UserError(`Connecting to ${host} timed out.`, 'Check the address, the SSH port, and that the server is online.'));
+      if (err.code === 'ECONNREFUSED') return reject(new UserError(`No SSH server is answering on ${host}:${port}.`, 'Check the address and SSH port.'));
+      if (err.code === 'ENOTFOUND') return reject(new UserError(`Can't find a machine called "${host}".`, 'Check the spelling of the address.'));
+      reject(err);
+    });
+    conn.connect({
+      host,
+      port,
+      username,
+      readyTimeout: 5 * 60_000, // includes the time someone spends typing their password
+      keepaliveInterval: 15_000,
+      authHandler,
+      hostVerifier: (key, verify) => {
+        const fingerprint = hostKeyFingerprint(key);
+        const saved = known[hostId];
+        if (saved === fingerprint) return verify(true);
+        if (saved) {
+          hostKeyError = new UserError(
+            `${host}'s SSH host key has changed.`,
+            `Expected ${saved}\nGot      ${fingerprint}\nIf the server was reinstalled, remove its line from ${KNOWN_HOSTS} and try again.`,
+          );
+          return verify(false);
+        }
+        Promise.resolve(confirmHostKey({ host: hostId, fingerprint })).then(
+          (ok) => {
+            if (!ok) {
+              hostKeyError = new UserError('Connection cancelled.', "The server's SSH key wasn't trusted.");
+              return verify(false);
+            }
+            known[hostId] = fingerprint;
+            writeJson(KNOWN_HOSTS, known);
+            verify(true);
+          },
+          () => verify(false),
+        );
+      },
+    });
+  });
+}
+
+/** Wrap a POSIX command so it runs under sh whatever the user's login shell is. */
+const sh = (command) => `sh -c '${command.replace(/'/g, "'\\''")}'`;
+
+/** Run a command on the server; resolves with { code, stdout, stderr }. */
+function run(conn, command, { stdin } = {}) {
+  return new Promise((resolve, reject) => {
+    conn.exec(command, (err, stream) => {
+      if (err) return reject(err);
+      let stdout = '';
+      let stderr = '';
+      stream.on('data', (d) => (stdout += d));
+      stream.stderr.on('data', (d) => (stderr += d));
+      stream.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }));
+      if (stdin !== undefined) stream.end(stdin);
+      else stream.end();
+    });
+  });
+}
+
+// ---- server facts and Node.js -------------------------------------------------
+
+const PROBE = `
+D="$HOME/.swiftssh"
+node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 18 ] 2>/dev/null; }
+N=""
+for c in "$D/runtime/bin/node" "$(command -v node 2>/dev/null)" /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node; do
+  if node_ok "$c"; then N="$c"; break; fi
+done
+if [ -z "$N" ] && [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; c=$(command -v node 2>/dev/null); node_ok "$c" && N="$c"; fi
+echo "node=$N"
+echo "os=$(uname -s)"
+echo "arch=$(uname -m)"
+if ls /lib/ld-musl-* >/dev/null 2>&1; then echo "libc=musl"; else echo "libc=glibc"; fi
+for pm in xbps-install apt-get dnf yum apk pacman zypper brew; do command -v $pm >/dev/null 2>&1 && { echo "pm=$pm"; break; }; done
+echo "uid=$(id -u)"
+command -v sudo >/dev/null 2>&1 && echo "sudo=1"
+if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; fi
+if [ -f "$D/bin/swiftssh.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftssh.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftssh.cjs") | cut -d' ' -f1)"; fi
+`;
+
+async function probe(conn) {
+  const { stdout } = await run(conn, 'sh -s', { stdin: PROBE });
+  const facts = {};
+  for (const line of stdout.split(/\r?\n/)) {
+    const i = line.indexOf('=');
+    if (i > 0) facts[line.slice(0, i)] = line.slice(i + 1).trim();
   }
-  if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(output)) {
-    return new UserError(`SSH doesn't trust ${host}'s host key.`, `Connect once with "ssh ${target}" to check and accept it, then try again.`);
+  return facts;
+}
+
+// Official Node.js builds are glibc-only; they need no root because they unpack into ~/.swiftssh/runtime.
+const NODE_DOWNLOAD = `
+set -e
+D="$HOME/.swiftssh"; mkdir -p "$D"
+case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) echo "unsupported system $(uname -s)" >&2; exit 3 ;; esac
+case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported CPU $(uname -m)" >&2; exit 3 ;; esac
+base=https://nodejs.org/dist/latest-v22.x
+fetch() { if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"; else wget -qO- "$1"; fi; }
+line=$(fetch "$base/SHASUMS256.txt" | grep " node-v[0-9.]*-$os-$arch.tar.gz$")
+sum=\${line%% *}; file=\${line##* }
+[ -n "$file" ] || { echo "no Node.js build for $os-$arch" >&2; exit 3; }
+tmp="$D/runtime.tmp"; rm -rf "$tmp"; mkdir -p "$tmp"
+fetch "$base/$file" > "$tmp/node.tar.gz"
+actual=$( (sha256sum "$tmp/node.tar.gz" 2>/dev/null || shasum -a 256 "$tmp/node.tar.gz") | cut -d' ' -f1)
+[ "$actual" = "$sum" ] || { echo "Node.js download failed its checksum" >&2; exit 4; }
+tar -xzf "$tmp/node.tar.gz" -C "$tmp" --strip-components=1
+rm -f "$tmp/node.tar.gz"; rm -rf "$D/runtime"; mv "$tmp" "$D/runtime"
+echo "$D/runtime/bin/node"
+`;
+
+const PACKAGE_INSTALL = {
+  'xbps-install': 'xbps-install -Sy nodejs',
+  'apt-get': 'apt-get update -qq && apt-get install -y -qq nodejs',
+  dnf: 'dnf install -y nodejs',
+  yum: 'yum install -y nodejs',
+  apk: 'apk add --no-cache nodejs',
+  pacman: 'pacman -Sy --noconfirm nodejs',
+  zypper: 'zypper --non-interactive install nodejs',
+};
+
+async function installNode(conn, facts, onStep, sudoPassword) {
+  const canDownload = facts.libc === 'glibc' && /^(Linux|Darwin)$/.test(facts.os) && /^(x86_64|amd64|aarch64|arm64)$/.test(facts.arch) && facts.fetch;
+  if (canDownload) {
+    onStep('Installing Node.js for your account (one time)');
+    const res = await run(conn, 'sh -s', { stdin: NODE_DOWNLOAD });
+    const nodePath = res.stdout.trim().split('\n').pop();
+    if (res.code === 0 && nodePath) return nodePath;
   }
-  if (/Connection refused/i.test(output)) return new UserError(`No SSH server is answering on ${host}.`, 'Check the address and SSH port.');
-  if (/Could not resolve hostname/i.test(output)) return new UserError(`Can't find a machine called "${host}".`, 'Check the spelling of the address.');
-  if (/timed out/i.test(output)) return new UserError(`Connecting to ${host} timed out.`, 'Check the machine is online and reachable from here.');
-  if (/(npx|node|npm)[^\n]*(not found|not recognized)/i.test(output)) {
-    return new UserError(`Node.js isn't installed on ${host}.`, 'Install Node.js 18 or newer on the server (https://nodejs.org), then try again.');
+
+  const installCmd = PACKAGE_INSTALL[facts.pm];
+  if (installCmd && (facts.uid === '0' || facts.sudo)) {
+    onStep(`Installing Node.js with ${facts.pm}`);
+    // As root run it directly; otherwise sudo, giving it the login password on stdin if we have one.
+    const res =
+      facts.uid === '0'
+        ? await run(conn, sh(installCmd))
+        : sudoPassword
+          ? await run(conn, `sudo -S -p '' ${sh(installCmd)}`, { stdin: `${sudoPassword}
+` })
+          : await run(conn, `sudo -n ${sh(installCmd)}`);
+    if (res.code === 0) {
+      const again = await probe(conn);
+      if (again.node) return again.node;
+    }
   }
-  return new UserError(`Starting swiftssh on ${host} failed (ssh exited with ${code}).`, output.trim().split('\n').slice(-5).join('\n'));
+
+  const manual = installCmd ? `sudo ${installCmd}` : 'install Node.js 18 or newer with your package manager';
+  throw new UserError(
+    `Node.js 18 or newer isn't installed on the server, and SwiftSSH couldn't install it automatically.`,
+    `On the server run:\n  ${manual}\nthen connect again.`,
+  );
 }
 
 /** One machine-readable line the server prints when it is up, so deploy can pin its cert. */

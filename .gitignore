@@ -4,3 +4,4 @@ node_modules/
 app/core/
 app/dist/
 superpowers/
+dist/

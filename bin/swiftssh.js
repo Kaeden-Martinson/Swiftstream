@@ -4,7 +4,6 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DEFAULT_PORT, ensureDir, loadHosts, paths, readJson, writeJson } from '../src/config.js';
 import { authorizeKey, keyFingerprint, loadOrCreateIdentity } from '../src/keys.js';
@@ -16,10 +15,11 @@ import { openShell } from '../src/shell.js';
 import { readyLine } from '../src/deploy.js';
 import { UserError, explainError } from '../src/errors.js';
 import { closest, deployHost, getHostOrExplain, probeHost, removeHost, saveProbedHost, validateHostName } from '../src/hosts.js';
-import { ask, c, confirm, info, ok, printError, table, warn } from '../src/ui.js';
+import { ask, askSecret, c, confirm, info, ok, printError, table, warn } from '../src/ui.js';
 import { formatBytes, parseSize } from '../src/util.js';
 
-const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+import { VERSION } from '../src/version.js';
+import { selfCommand } from '../src/self.js';
 
 const OPTIONS = {
   port: { type: 'string' },
@@ -28,7 +28,7 @@ const OPTIONS = {
   parallel: { type: 'string' },
   chunk: { type: 'string' },
   'ssh-port': { type: 'string' },
-  'remote-cmd': { type: 'string' },
+  name: { type: 'string' },
   authorize: { type: 'string' },
   size: { type: 'string' },
   files: { type: 'string' },
@@ -84,7 +84,7 @@ const COMMANDS = {
       ok(`Your key is ready ${c.dim(keyFingerprint(identity.publicKeyString))}`);
       console.log(`
 How do you want to connect?
-  ${c.bold('1')}  I can already log in to the server with ssh ${c.dim('(recommended: swiftssh installs itself there)')}
+  ${c.bold('1')}  I have an SSH login (username and password, or a key) ${c.dim('(recommended: swiftssh installs itself there)')}
   ${c.bold('2')}  swiftssh is already running on the server
 `);
       const choice = await ask('Choose 1 or 2', '1');
@@ -107,10 +107,11 @@ How do you want to connect?
   deploy: {
     group: 'Get started',
     usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022]',
-    summary: 'Start swiftssh on a server you can ssh into, and save it',
-    details: `Logs in with your normal ssh once, starts swiftssh in the background (via "npx swiftssh"),
-authorizes this computer's key, and pins the server's identity. Requires Node.js 18+ on the server.
-Use --remote-cmd to run a different swiftssh command on the server.`,
+    summary: 'Set up swiftssh on a server you can log in to, and save it',
+    details: `Logs in over SSH once (your SSH key if you have one, otherwise your password),
+installs Node.js for your account if the server has none, uploads swiftssh, starts it in the
+background, authorizes this computer's key, and pins the server's identity.
+"swiftssh connect user@host" does the same thing automatically the first time.`,
     async run([name, target], opts) {
       need(name && target, this.usage);
       await deployCommand(name, target, opts);
@@ -154,12 +155,18 @@ Use --remote-cmd to run a different swiftssh command on the server.`,
 
   connect: {
     group: 'Use a server',
-    usage: 'connect <name>',
-    summary: 'Open a shell on a server',
-    async run([name]) {
-      need(name, this.usage);
-      await withClient(name, {}, async (conn) => {
-        process.exitCode = await openShell(conn);
+    usage: 'connect <name | user@host> [--ssh-port 22] [--port 7022] [--name prod]',
+    summary: 'Open a shell on a server (sets it up the first time)',
+    details: `Give a saved server's name, or an SSH login like ubuntu@203.0.113.7. The first time you
+use a login, swiftssh signs in over SSH (asking for the password if your SSH key isn't accepted),
+installs itself on the server, and saves it under --name (default: the host's short name).`,
+    async run([target], opts) {
+      need(target, this.usage);
+      const name = await resolveOrSetUp(target, opts);
+      await withServerRunning(name, opts, async () => {
+        await withClient(name, {}, async (conn) => {
+          process.exitCode = await openShell(conn);
+        });
       });
     },
   },
@@ -323,18 +330,60 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
 // Old names keep working.
 const ALIASES = { keygen: 'key', ls: 'hosts', rm: 'remove', ssh: 'connect', upload: 'push', download: 'pull' };
 
-async function deployCommand(name, target, opts) {
+/**
+ * "connect user@host": reuse a saved server set up with that login, or set it up now.
+ * A plain name must already be saved.
+ */
+async function resolveOrSetUp(target, opts) {
+  const hosts = loadHosts();
+  if (hosts[target]) return target;
+  const looksLikeLogin = target.includes('@') || /[.:]/.test(target);
+  if (!looksLikeLogin) getHostOrExplain(target); // throws, with a "did you mean"
+  const saved = Object.entries(hosts).find(([, h]) => h.ssh === target);
+  if (saved) return saved[0];
+  let name = opts.name || defaultName(target);
+  for (let i = 2; !opts.name && hosts[name]; i++) name = `${defaultName(target)}-${i}`;
+  await deployCommand(name, target, opts, { quiet: true });
+  return name;
+}
+
+/** If a saved server isn't answering but we know its SSH login, offer to start swiftssh again. */
+async function withServerRunning(name, opts, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const host = loadHosts()[name];
+    if (err.code !== 'ECONNREFUSED' || !host?.ssh || !process.stdin.isTTY) throw err;
+    warn(`SwiftSSH isn't running on ${name}.`);
+    if (!(await confirm(`Start it again by logging in to ${host.ssh}?`, true))) throw err;
+    await deployCommand(name, host.ssh, { ...opts, 'ssh-port': opts['ssh-port'] || host.sshPort }, { quiet: true });
+    return fn();
+  }
+}
+
+async function deployCommand(name, target, opts, { quiet = false } = {}) {
   validateHostName(name);
-  info(`Logging in to ${c.bold(target)} with ssh to start swiftssh there...`);
   const { host, info: remote } = await deployHost({
     name,
     target,
     sshPort: opts['ssh-port'],
     port: Number(opts.port) || DEFAULT_PORT,
-    remoteCmd: opts['remote-cmd'],
+    askPassword: (attempt) =>
+      // Piped input (scripts) gets one try; a person at the keyboard gets three.
+      attempt && !process.stdin.isTTY
+        ? Promise.reject(new UserError('Wrong password.'))
+        : askSecret(attempt ? 'Wrong password, try again:' : `Password for ${target}:`),
+    confirmHostKey: async ({ host: sshHost, fingerprint }) => {
+      console.error(`
+  First connection to ${c.bold(sshHost)}. Its SSH key fingerprint is:
+  ${fingerprint}
+`);
+      return opts.yes || confirm('Continue connecting?', true);
+    },
+    onStep: (text) => info(`${text}…`),
   });
   ok(`${c.bold(name)} is ready: ${remote.hostname} (${remote.platform}) at ${new URL(host.url).host}`);
-  nextSteps(name);
+  if (!quiet) nextSteps(name);
 }
 
 async function addByAddress(name, address, yes) {
@@ -404,10 +453,11 @@ async function daemonize(port, opts) {
   if (!(await portOpen(port))) {
     ensureDir();
     const logFd = fs.openSync(paths.log, 'a');
-    const childArgs = [fileURLToPath(import.meta.url), 'serve', '--port', String(port)];
+    const [exe, ...selfArgs] = selfCommand();
+    const childArgs = [...selfArgs, 'serve', '--port', String(port)];
     if (opts.host) childArgs.push('--host', opts.host);
     if (opts.root) childArgs.push('--root', opts.root);
-    const child = spawn(process.execPath, childArgs, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true });
+    const child = spawn(exe, childArgs, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true });
     child.unref();
     const deadline = Date.now() + 15_000;
     while (!(await portOpen(port))) {

@@ -13,7 +13,7 @@ Download `SwiftSSH-Setup-<version>.exe` and run it. Choose **Add a server**, ent
 - **Files tab:** browse folders, drag files or folders in to upload, select items and press Download. Transfers show their progress at the bottom right and resume if interrupted.
 - **Error messages** say what went wrong and what to do. If the server stopped, a **Start server again** button restarts it over SSH.
 
-The app logs in with your SSH **key**, since it can't type passwords. If you normally use a password, run `ssh-copy-id user@host` once, or use `swiftssh setup` in a terminal.
+Log in with a password or your SSH key. The password is used only for that one login, plus `sudo` if Node.js has to be installed, and is never saved. From then on the app uses its own key.
 
 To build it yourself, see [Development](#development).
 
@@ -22,8 +22,9 @@ To build it yourself, see [Development](#development).
 ```bash
 npm i -g swiftssh
 
-swiftssh setup                             # guided: connect your first server
-swiftssh deploy prod me@prod.example.com   # same thing in one line: ssh in, start swiftssh, authorize your key, pin its cert
+swiftssh connect ubuntu@box.example.com    # first time: asks for the password, installs itself, opens a shell
+swiftssh connect box                       # afterwards: by its saved name, no password
+swiftssh setup                             # or a guided version of the same
 swiftssh connect prod                      # interactive shell
 swiftssh push prod ./build.tar.gz /srv/    # parallel, resumable, checksummed upload
 swiftssh pull prod /var/log/app.log .
@@ -79,7 +80,34 @@ The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per
 | `GET /v1/ls?path`, `POST /v1/mkdir` | One folder level and folder creation, for the app's file browser |
 | `WSS /v1/shell?cmd&pty&cols&rows` | Shell or exec. Binary frames start with a stream id byte (0 stdin / 1 stdout / 2 stderr). Text frames are JSON control messages (`hello`, `resize`, `eof`, `exit`). |
 
-The server uses a real PTY when `node-pty` is installed (an optional dependency) and falls back to plain pipes otherwise.
+Shells get a real terminal, so vim, htop and Ctrl+C work:
+
+- with `node-pty` when it's installed (the Void installer builds it);
+- otherwise with the system's `script` command (Linux and macOS), where the size is set when the shell opens but later window resizes aren't passed through;
+- as a last resort, plain pipes.
+
+## Standalone executable
+
+```bash
+npm run build
+```
+
+This produces two files:
+
+- `dist/swiftssh.cjs`: the whole CLI and server in one file.
+- `dist/swiftssh.exe` (`dist/swiftssh` on macOS and Linux): a single executable with Node built in. Copy it anywhere and run it; nothing else needs to be installed on that computer, not even `ssh`.
+
+The first `swiftssh connect user@host`:
+
+1. Logs in over SSH with the built-in client. It tries your SSH agent and keys first, then asks for the password.
+2. On the first connection to a server, shows its SSH host key fingerprint and remembers it. If that key later changes, it refuses to connect.
+3. Finds Node.js 18 or newer on the server. If there isn't one, it downloads the official build into `~/.swiftssh/runtime` (checked against nodejs.org's SHA-256 list; no root needed). On musl systems or unusual CPUs it uses the package manager with `sudo` instead.
+4. Uploads `swiftssh.cjs` to `~/.swiftssh/bin`, starts it in the background, authorizes this computer's key, and pins its certificate.
+5. Opens a shell. Later connections use the saved server and its key, with no password.
+
+If the saved server stops answering (after a reboot, say), `connect` offers to log in and start it again.
+
+The executable embeds the Node version that built it (about 90 MB) and isn't code-signed yet.
 
 ## Running on a Void Linux server
 
@@ -118,6 +146,7 @@ npm test            # end-to-end: real server + client on localhost
 The desktop app lives in `app/`. It's an Electron app that runs the same `src/` client code, copied into `app/core` by `npm run sync-core`.
 
 ```bash
+npm run build                     # the app ships the server bundle from dist/
 npm --prefix app install
 npm run app         # run the app from source
 npm run app:dist    # build app/dist/SwiftSSH-Setup-<version>.exe
@@ -141,12 +170,11 @@ SWIFTSSH_HOME=/tmp/srv node bin/swiftssh.js authorize "$(node bin/swiftssh.js ke
 node bin/swiftssh.js add local 127.0.0.1:7022
 ```
 
-Until the package is published to npm, test `deploy` against a host where you've cloned the repo:
-`swiftssh deploy box me@box --remote-cmd "node ~/swiftssh/bin/swiftssh.js"`.
+`npm test` also runs `test/bootstrap.js`. It starts a small SSH server in-process and checks first-time setup with a password, through both the source CLI and `swiftssh.exe` (it needs a POSIX `sh`, such as Git Bash on Windows).
 
 ## Roadmap
 
-1. **Publish to npm** so that `deploy`'s default `npx -y swiftssh` works on any host that has Node.
+1. **Publish to npm and GitHub Releases**: `swiftssh.exe` and the app installer, signed.
 2. **Delta transfer** for large files that changed slightly (rsync-style rolling checksums), and an optional `--delete` for folder sync.
 3. **HTTP/3 / QUIC transport** for lossy links, keeping HTTPS/1.1 as the fallback.
 4. **Accounts** (Termius-style): a hosted account that syncs your host list and public keys between devices. The private key stays on each device.

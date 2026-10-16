@@ -109,8 +109,9 @@
       </div>
 
       <div data-mode="ssh">
-        <p class="muted">SwiftSSH logs in with your SSH key once, starts itself on the server, and remembers it. The server needs Node.js 18 or newer.</p>
+        <p class="muted">SwiftSSH logs in once, installs itself on the server (and Node.js if it's missing), and remembers it. Your password is used only for this login and is never saved.</p>
         <label class="field"><span>SSH login</span><input name="target" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Password <small class="muted">leave empty to use your SSH key</small></span><input name="password" type="password" autocomplete="off"></label>
         <div class="field-row">
           <label class="field"><span>Name</span><input name="name" placeholder="prod" autocomplete="off" spellcheck="false"></label>
           <label class="field narrow"><span>SSH port</span><input name="sshPort" placeholder="22" inputmode="numeric"></label>

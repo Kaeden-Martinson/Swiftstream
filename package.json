@@ -14,16 +14,22 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "test": "node test/e2e.js",
+    "test": "node test/e2e.js && node test/bootstrap.js",
     "app": "npm --prefix app start",
-    "app:dist": "npm --prefix app run dist"
+    "app:dist": "npm --prefix app run dist",
+    "build": "node scripts/build.mjs"
   },
   "dependencies": {
     "selfsigned": "^2.4.1",
+    "ssh2": "^1.17.0",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
     "node-pty": "^1.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
+  }
 }

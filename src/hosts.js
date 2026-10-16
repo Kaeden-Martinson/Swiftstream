@@ -57,23 +57,33 @@ export function saveProbedHost(name, probe) {
   saveHost(name, { url: probe.url, fingerprint: probe.fingerprint, cert: probe.cert });
 }
 
-/** Start swiftssh on a machine you can already ssh into, authorize this computer, and save it. */
-export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, remoteCmd, batch = false }) {
+/**
+ * Log in to a server over SSH (key or password), start swiftssh there, authorize this computer,
+ * and save it. See deployOverSsh for the callbacks (askPassword, confirmHostKey, onStep).
+ */
+export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, ...sshOptions }) {
   validateHostName(name);
-  if (!/^([\w.-]+@)?[\w.-]+$/.test(target || '')) {
-    throw new UserError(`"${target}" isn't a valid SSH login.`, 'Use the form user@hostname, like ubuntu@203.0.113.7.');
-  }
   const identity = loadOrCreateIdentity();
-  const ready = await deployOverSsh({ target, sshPort, port, remoteCmd, publicKey: identity.publicKeyString, batch });
-  const hostname = target.includes('@') ? target.split('@')[1] : target;
-  const host = { url: `https://${hostname}:${ready.port}`, fingerprint: ready.fingerprint, cert: ready.cert, ssh: target };
-  if (sshPort) host.sshPort = Number(sshPort);
+  const ready = await deployOverSsh({ target, sshPort, port, publicKey: identity.publicKeyString, ...sshOptions });
+  const address = ready.host.includes(':') ? `[${ready.host}]` : ready.host;
+  const host = { url: `https://${address}:${ready.port}`, fingerprint: ready.fingerprint, cert: ready.cert, ssh: target };
+  if (sshPort && Number(sshPort) !== 22) host.sshPort = Number(sshPort);
   saveHost(name, host);
-  const client = await connectClient(host, identity);
+  sshOptions.onStep?.('Connecting to SwiftSSH');
+  let client;
   try {
+    client = await connectClient(host, identity);
     return { host, info: await client.request('GET', '/v1/info') };
+  } catch (err) {
+    if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message)) {
+      throw new UserError(
+        `SwiftSSH is running on ${ready.host}, but port ${ready.port} can't be reached from here.`,
+        `Open ${ready.port}/tcp in the server's firewall (for example "sudo ufw allow ${ready.port}/tcp", or your cloud provider's security group), then run "swiftssh connect ${name}".`,
+      );
+    }
+    throw err;
   } finally {
-    client.close();
+    client?.close();
   }
 }
 

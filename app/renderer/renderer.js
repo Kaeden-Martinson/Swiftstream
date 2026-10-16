@@ -201,8 +201,16 @@ async function redeploy(host) {
   const button = $('banner-action');
   button.disabled = true;
   button.textContent = 'Starting…';
+  const deploy = (password) => call(api.hosts.deploy({ name: host.name, target: host.ssh, sshPort: host.sshPort, password }));
   try {
-    await call(api.hosts.deploy({ name: host.name, target: host.ssh, sshPort: host.sshPort }));
+    try {
+      await deploy(); // an SSH key may be enough
+    } catch (err) {
+      if (!/was refused/.test(err.message)) throw err;
+      const password = await prompt({ title: `Log in to ${host.ssh}`, text: 'Enter the SSH password to start SwiftSSH again. It is used once and not saved.', ok: 'Start server', secret: true });
+      if (!password) return;
+      await deploy(password);
+    }
     await checkHost(host.name);
   } catch (err) {
     showBanner(err);
@@ -633,11 +641,12 @@ api.transfers.onDone(({ id, error, revealPath }) => {
 
 // ---------- dialogs ----------
 
-function prompt({ title, text, value, ok, input = true }) {
+function prompt({ title, text, value, ok, input = true, secret = false }) {
   const dialog = $('prompt-dialog');
   $('prompt-title').textContent = title;
   $('prompt-text').textContent = text || '';
   $('prompt-field').hidden = !input;
+  $('prompt-input').type = secret ? 'password' : 'text';
   $('prompt-input').value = value || '';
   $('prompt-ok').textContent = ok || 'OK';
   dialog.showModal();
@@ -652,7 +661,9 @@ function prompt({ title, text, value, ok, input = true }) {
     };
     const onSubmit = (e) => {
       e.preventDefault();
-      finish(input ? $('prompt-input').value.trim() : true);
+      const entered = $('prompt-input').value;
+      $('prompt-input').value = '';
+      finish(input ? (secret ? entered : entered.trim()) : true);
     };
     const onCancel = (e) => {
       e?.preventDefault();
@@ -755,6 +766,10 @@ addForm.addEventListener('change', (e) => {
 addForm.elements.target.addEventListener('input', (e) => (addForm.elements.name.placeholder = suggestName(e.target.value) || 'prod'));
 addForm.elements.address.addEventListener('input', (e) => (addForm.elements.directName.placeholder = suggestName(e.target.value) || 'home-server'));
 
+api.hosts.onDeployStep(({ text }) => {
+  if (!$('add-progress').hidden) $('add-progress-text').textContent = `${text}…`;
+});
+
 addForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   setAddError(null);
@@ -764,8 +779,10 @@ addForm.addEventListener('submit', async (e) => {
       const target = f.target.value.trim();
       const name = f.name.value.trim() || suggestName(target);
       if (!target) throw { message: 'Enter the SSH login you use for this server.', hint: 'For example ubuntu@203.0.113.7' };
-      setAddBusy(`Logging in to ${target} and starting SwiftSSH. The first time can take a minute while npm downloads it.`);
-      await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null }));
+      setAddBusy(`Connecting to ${target}…`);
+      const password = f.password.value;
+      f.password.value = ''; // don't keep it in the form
+      await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null, password }));
       $('add-dialog').close();
       await loadHosts(name);
     } else if (addStep === 'form') {

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('swift', {
     probe: (address) => call('hosts:probe', address),
     trust: (name, url) => call('hosts:trust', name, url),
     deploy: (opts) => call('hosts:deploy', opts),
+    onDeployStep: on('deploy:step'),
     remove: (name) => call('hosts:remove', name),
     info: (name) => call('hosts:info', name),
   },

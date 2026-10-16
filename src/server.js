@@ -4,13 +4,14 @@ import fsp from 'node:fs/promises';
 import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { ensureDir, paths, readJson, writeJson } from './config.js';
 import { authMessage, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, verify } from './keys.js';
 import { loadOrCreateServerCert } from './tls.js';
 import { decodeBundle, encodeBundle } from './bundle.js';
 import { hashFile, safeJoin, sameMtime, walk, writeFileAtomic } from './util.js';
+import { VERSION } from './version.js';
 
 const CHALLENGE_TTL_MS = 60_000;
 const SESSION_TTL_MS = 12 * 60 * 60_000;
@@ -22,7 +23,6 @@ const AUTH_MAX_FAILURES = 10; // per IP per window, then 429 until the window pa
 const AUTH_MAX_CHALLENGES = 120; // per IP per window
 const MAX_PENDING_CHALLENGES = 10_000;
 const STALE_UPLOAD_MS = 7 * 24 * 60 * 60_000;
-const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -429,13 +429,38 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   return { server, fingerprint, cert, port: server.address().port, close };
 }
 
+let scriptFlavor; // 'linux' (util-linux/busybox), 'bsd' (macOS/BSD), or null
+function detectScript() {
+  if (scriptFlavor !== undefined) return scriptFlavor;
+  scriptFlavor = null;
+  if (process.platform === 'win32') return scriptFlavor;
+  const found = spawnSync('sh', ['-c', 'command -v script'], { encoding: 'utf8' });
+  if (found.status === 0 && found.stdout.trim()) scriptFlavor = process.platform === 'linux' ? 'linux' : 'bsd';
+  return scriptFlavor;
+}
+
+/**
+ * [file, args] that run the shell (or cmd) inside a pseudo-terminal using script(1).
+ * The size is set once at start; later window resizes aren't passed through (install node-pty for that).
+ */
+function scriptCommand(shell, cmd, cols, rows) {
+  const flavor = detectScript();
+  if (!flavor) return null;
+  const quote = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+  const inner = `stty rows ${Number(rows)} cols ${Number(cols)} 2>/dev/null; ${cmd ? `exec sh -c ${quote(cmd)}` : `exec ${quote(shell)} -l`}`;
+  return flavor === 'linux' ? ['script', ['-qfc', inner, '/dev/null']] : ['script', ['-q', '/dev/null', 'sh', '-c', inner]];
+}
+
 function runShell(ws, url, { root, pty }) {
   const cmd = url.searchParams.get('cmd');
   const cols = Number(url.searchParams.get('cols')) || 80;
   const rows = Number(url.searchParams.get('rows')) || 24;
-  const wantPty = url.searchParams.get('pty') === '1' && !!pty;
+  const ptyRequested = url.searchParams.get('pty') === '1';
+  const wantPty = ptyRequested && !!pty;
   const isWin = process.platform === 'win32';
   const shell = isWin ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || '/bin/sh';
+  // Without node-pty, the system "script" command still gives a real terminal on Linux and macOS.
+  const viaScript = ptyRequested && !wantPty && !!scriptCommand(shell, cmd, cols, rows);
   const control = (msg) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
   // Binary frames carry a 1-byte stream id: 0 = stdin, 1 = stdout, 2 = stderr.
   const out = (streamId, data) => ws.readyState === ws.OPEN && ws.send(Buffer.concat([Buffer.from([streamId]), Buffer.from(data)]));
@@ -447,7 +472,7 @@ function runShell(ws, url, { root, pty }) {
     ws.close();
   };
 
-  control({ type: 'hello', pty: wantPty, platform: process.platform });
+  control({ type: 'hello', pty: wantPty || viaScript, platform: process.platform });
 
   if (wantPty) {
     const args = cmd ? (isWin ? ['/c', cmd] : ['-c', cmd]) : [];
@@ -463,9 +488,13 @@ function runShell(ws, url, { root, pty }) {
     return;
   }
 
-  const child = cmd
-    ? spawn(cmd, { shell: true, cwd: root, env: process.env })
-    : spawn(shell, isWin ? [] : ['-i'], { cwd: root, env: process.env });
+  let child;
+  if (viaScript) {
+    const [file, args] = scriptCommand(shell, cmd, cols, rows);
+    child = spawn(file, args, { cwd: root, env: { ...process.env, TERM: 'xterm-256color' } });
+  } else {
+    child = cmd ? spawn(cmd, { shell: true, cwd: root, env: process.env }) : spawn(shell, isWin ? [] : ['-i'], { cwd: root, env: process.env });
+  }
   child.stdout.on('data', (d) => out(1, d));
   child.stderr.on('data', (d) => out(2, d));
   child.on('error', (err) => {

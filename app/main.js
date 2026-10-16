@@ -101,9 +101,19 @@ handle('hosts:trust', (name, url) => {
   dropClient(name);
 });
 
-handle('hosts:deploy', async ({ name, target, sshPort }) => {
+handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
   dropClient(name);
-  const { info } = await deployHost({ name, target, sshPort: sshPort || undefined, batch: true });
+  const { info } = await deployHost({
+    name,
+    target,
+    sshPort: sshPort || undefined,
+    // Used for this one login (and sudo, if Node.js must be installed). Never stored.
+    password: password || undefined,
+    bundlePath: path.join(dirname, 'core', 'swiftssh.cjs'),
+    // The SSH host key is remembered on first use; a changed key is refused (see core/deploy.js).
+    confirmHostKey: async () => true,
+    onStep: (text) => send('deploy:step', { name, text }),
+  });
   return info;
 });
 

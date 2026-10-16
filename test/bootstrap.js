@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const cli = path.join(root, 'bin', 'swiftstream.js');
+// test/package.js points this at a copy installed from the packed tarball.
+const cli = process.env.SWIFTSTREAM_TEST_CLI || path.join(root, 'bin', 'swiftstream.js');
 const work = path.join(root, '.test-home', 'bootstrap');
 const exe = path.join(root, 'dist', process.platform === 'win32' ? 'swiftstream.exe' : 'swiftstream');
 

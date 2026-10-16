@@ -1,7 +1,26 @@
 {
   "name": "swiftstream",
   "version": "0.1.0",
-  "description": "Fast, loss-tolerant remote shell and file transfer over HTTPS with SSH-style key auth",
+  "description": "Terminal and fast, resumable file transfer for your servers: sign in over SSH once, then everything goes over HTTPS on parallel connections.",
+  "keywords": [
+    "ssh",
+    "sftp",
+    "scp",
+    "file-transfer",
+    "remote-shell",
+    "deploy",
+    "cli",
+    "https"
+  ],
+  "homepage": "https://github.com/Kaeden-Martinson/SwiftSSH#readme",
+  "bugs": {
+    "url": "https://github.com/Kaeden-Martinson/SwiftSSH/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kaeden-Martinson/SwiftSSH.git"
+  },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "swiftstream": "bin/swiftstream.js",
@@ -9,7 +28,9 @@
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "dist/swiftstream.cjs",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18.17"
@@ -20,7 +41,9 @@
     "app:dist": "npm --prefix app run dist",
     "build": "node scripts/build.mjs",
     "release": "node scripts/release.mjs",
-    "publish-site": "node scripts/publish-site.mjs"
+    "publish-site": "node scripts/publish-site.mjs",
+    "prepack": "node scripts/build.mjs --no-exe",
+    "test:package": "node test/package.js"
   },
   "dependencies": {
     "selfsigned": "^2.4.1",
@@ -30,7 +53,6 @@
   "optionalDependencies": {
     "node-pty": "^1.0.0"
   },
-  "license": "MIT",
   "devDependencies": {
     "esbuild": "^0.28.2",
     "postject": "^1.0.0-alpha.6"

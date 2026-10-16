@@ -121,6 +121,24 @@ If the saved server stops answering (after a reboot, say), `connect` offers to l
 
 The executable embeds the Node version that built it (about 90 MB) and isn't code-signed yet.
 
+## Publishing to npm
+
+```bash
+npm run test:package
+```
+
+This packs the package, installs it the way `npm i -g swiftstream` does, and runs the SSH setup tests against that copy. The package includes the server bundle (`dist/swiftstream.cjs`), built fresh by the `prepack` script. Then publish:
+
+```bash
+npm login
+```
+
+```bash
+npm publish --access public
+```
+
+Each version number can only be published once: bump `version` in `package.json` (and `app/package.json`) for the next release. The full manual test plan, covering the CLI, app, server and website, is in [docs/TESTING.md](docs/TESTING.md).
+
 ## Releasing and publishing the website
 
 The website (`site/`) hosts the downloads itself.

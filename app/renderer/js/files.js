@@ -165,6 +165,7 @@ function renderPane(pane) {
       el('td', { className: 'num muted', textContent: entry.isDirectory ? '' : formatBytes(entry.size) }),
       el('td', { className: 'muted', textContent: entry.mtime ? dateFmt.format(entry.mtime) : '' }),
     );
+    row.dataset.name = entry.name;
     if (entry.isDirectory) {
       row.dataset.dir = '1';
       row.dataset.path = entryPath(pane, entry);
@@ -508,8 +509,164 @@ function showDropTarget(side) {
   part(side, 'list').classList.add('dropping');
 }
 
+// ---------- box selection ----------
+// Dragging a row toward the other pane moves the selection there (This computer → right, server
+// → left). Dragging the other way or up and down draws a selection box, as does dragging on empty space.
+
+function enableBoxSelect(side) {
+  const list = part(side, 'list');
+  let box = null; // { pane, x, y, startClient, toggle, base, el, moved, waitForDrag, lastClient, timer }
+  const towardOtherPane = (dx) => (side === 'local' ? dx > 0 : dx < 0);
+  let swallowClick = false;
+  // The click that ends a box drag must not reselect the row under the pointer.
+  list.addEventListener('click', (e) => swallowClick && e.stopPropagation(), { capture: true });
+
+  const contentPoint = (e) => {
+    const rect = list.getBoundingClientRect();
+    return { x: e.clientX - rect.left + list.scrollLeft, y: e.clientY - rect.top + list.scrollTop };
+  };
+
+  function update(lastClient) {
+    const rect = list.getBoundingClientRect();
+    const p = { x: lastClient.x - rect.left + list.scrollLeft, y: lastClient.y - rect.top + list.scrollTop };
+    const left = Math.min(box.x, p.x);
+    const top = Math.min(box.y, p.y);
+    const width = Math.abs(p.x - box.x);
+    const height = Math.abs(p.y - box.y);
+    Object.assign(box.el.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    const selection = new Set(box.base);
+    let last = null;
+    for (const row of list.querySelectorAll('tbody tr[data-name]')) {
+      const rowTop = row.offsetTop;
+      const hit = rowTop < top + height && rowTop + row.offsetHeight > top;
+      if (hit) {
+        // Ctrl+drag flips what the box covers, like Ctrl+click.
+        if (box.toggle && box.base.has(row.dataset.name)) selection.delete(row.dataset.name);
+        else selection.add(row.dataset.name);
+        last = row.dataset.name;
+      }
+      row.classList.toggle('selected', selection.has(row.dataset.name));
+    }
+    box.pane.selection = selection;
+    if (last) box.pane.anchor = last;
+  }
+
+  function autoScroll() {
+    const rect = list.getBoundingClientRect();
+    const edge = 28;
+    const y = box.lastClient.y;
+    const step = y < rect.top + edge ? -14 : y > rect.bottom - edge ? 14 : 0;
+    if (step) {
+      list.scrollTop += step;
+      update(box.lastClient);
+    }
+  }
+
+  list.addEventListener('pointerdown', (e) => {
+    const pane = paneFor(side);
+    if (e.button !== 0 || !pane?.listing || pane.loading) return;
+    // Headers, inputs and the ".." row keep their own behavior.
+    if (e.target.closest('thead, input, button, .parent-row')) return;
+    if (e.clientX - list.getBoundingClientRect().left > list.clientWidth) return; // the scrollbar
+    const start = contentPoint(e);
+    const toggle = e.ctrlKey || e.metaKey;
+    const row = e.target.closest('tbody tr[data-name]');
+    box = {
+      pane,
+      x: start.x,
+      y: start.y,
+      startClient: { x: e.clientX, y: e.clientY },
+      toggle,
+      base: toggle || e.shiftKey ? new Set(pane.selection) : new Set(),
+      el: null,
+      moved: false,
+      // On a row, the browser's dragstart comes first; it decides between moving files and the box.
+      waitForDrag: !!row?.draggable,
+      lastClient: { x: e.clientX, y: e.clientY },
+      timer: null,
+    };
+    list.focus({ preventScroll: true });
+    lastPaneSide = side;
+  });
+
+  function beginBox(pointerId) {
+    box.moved = true;
+    box.waitForDrag = false;
+    // Capture only once the box starts, so plain clicks and double-clicks still reach the rows.
+    try {
+      list.setPointerCapture(pointerId);
+    } catch {
+      /* pointer already gone */
+    }
+    box.el = el('div', { className: 'select-box' });
+    list.append(box.el);
+    box.timer = setInterval(autoScroll, 30);
+  }
+
+  // Runs before the row's own dragstart (capture phase).
+  list.addEventListener(
+    'dragstart',
+    (e) => {
+      if (!box?.waitForDrag) return;
+      // dragstart reports where the drag began, so the direction comes from the last pointer move.
+      const dx = box.lastClient.x - box.startClient.x;
+      const dy = box.lastClient.y - box.startClient.y;
+      const unknown = Math.abs(dx) < 2 && Math.abs(dy) < 2; // no move seen yet: keep the usual file drag
+      if (unknown || (Math.abs(dx) >= Math.abs(dy) && towardOtherPane(dx))) {
+        box = null; // a file drag: startDrag takes it from here
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      beginBox(1);
+      update(box.lastClient);
+    },
+    { capture: true },
+  );
+
+  list.addEventListener('pointermove', (e) => {
+    if (!box) return;
+    box.lastClient = { x: e.clientX, y: e.clientY };
+    if (box.waitForDrag) return;
+    if (!box.moved) {
+      const p = contentPoint(e);
+      if (Math.abs(p.x - box.x) < 4 && Math.abs(p.y - box.y) < 4) return;
+      beginBox(e.pointerId);
+    } else if (!list.hasPointerCapture(e.pointerId)) {
+      try {
+        list.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer already gone */
+      }
+    }
+    update(box.lastClient);
+  });
+
+  const finish = (e) => {
+    if (!box) return;
+    const { pane, moved } = box;
+    clearInterval(box.timer);
+    box.el?.remove();
+    box = null;
+    if (list.hasPointerCapture(e.pointerId)) list.releasePointerCapture(e.pointerId);
+    if (moved) {
+      swallowClick = true;
+      setTimeout(() => (swallowClick = false));
+      renderPane(pane);
+    } else if (!e.target.closest('tbody tr[data-name]') && !(e.ctrlKey || e.metaKey || e.shiftKey)) {
+      // A plain click on empty space clears the selection. (Clicks on rows are left to the row's
+      // own click handler: redrawing here would replace the row before its click and double-click.)
+      pane.selection.clear();
+      renderPane(pane);
+    }
+  };
+  list.addEventListener('pointerup', finish);
+  list.addEventListener('pointercancel', finish);
+}
+
 for (const side of ['local', 'remote']) {
   const list = part(side, 'list');
+  enableBoxSelect(side);
   list.addEventListener('dragover', (e) => {
     if (!canDrop(side, e)) return;
     e.preventDefault();

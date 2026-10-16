@@ -10,7 +10,7 @@ const DEFAULT_ACTIONS = [
 ];
 
 function settings() {
-  return { autoHeal: true, healthInterval: 30, confirmDelete: true, showHidden: true, uploadOnSave: true, actions: DEFAULT_ACTIONS, ...(state.saved.settings || {}) };
+  return { theme: 'system', autoHeal: true, healthInterval: 30, confirmDelete: true, showHidden: true, uploadOnSave: true, actions: DEFAULT_ACTIONS, ...(state.saved.settings || {}) };
 }
 
 function updateSettings(patch) {
@@ -66,8 +66,9 @@ function actionMenuItems(scope, ctx) {
 
 function renderSettings() {
   const s = settings();
+  for (const radio of document.querySelectorAll('#set-theme input')) radio.checked = radio.value === s.theme;
   $('set-autoheal').checked = s.autoHeal;
-  $('set-interval').value = String(s.healthInterval);
+  for (const radio of document.querySelectorAll('#set-interval input')) radio.checked = Number(radio.value) === s.healthInterval;
   $('set-confirm-delete').checked = s.confirmDelete;
   $('set-hidden').checked = s.showHidden;
   $('set-upload-save').checked = s.uploadOnSave;
@@ -118,6 +119,8 @@ $('reset-actions').addEventListener('click', async () => {
   updateSettings({ actions: DEFAULT_ACTIONS });
   renderActionList();
 });
+// Saving the setting is enough: the main process switches Electron's theme, and js/theme.js follows.
+$('set-theme').addEventListener('change', (e) => updateSettings({ theme: e.target.value }));
 $('set-autoheal').addEventListener('change', (e) => updateSettings({ autoHeal: e.target.checked }));
 $('set-interval').addEventListener('change', (e) => updateSettings({ healthInterval: Number(e.target.value) }));
 $('set-confirm-delete').addEventListener('change', (e) => updateSettings({ confirmDelete: e.target.checked }));

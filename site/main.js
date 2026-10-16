@@ -68,6 +68,41 @@ toggle.addEventListener('click', () => setMenu(!nav.classList.contains('open')))
 navLinks.forEach((a) => a.addEventListener('click', () => setMenu(false)));
 document.addEventListener('keydown', (e) => e.key === 'Escape' && setMenu(false));
 
+// ---------- light / dark theme (the first pick happens in <head>, before paint) ----------
+const themeBtn = $('theme-btn');
+const systemLight = window.matchMedia('(prefers-color-scheme: light)');
+function applyTheme(theme, fade) {
+  const root = document.documentElement;
+  if (fade && !reduceMotion) {
+    root.classList.add('theme-fading');
+    setTimeout(() => root.classList.remove('theme-fading'), 300);
+  }
+  root.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f7f8fa' : '#0e1013';
+  themeBtn.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+}
+applyTheme(document.documentElement.dataset.theme || 'dark', false);
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  try {
+    // Choosing the theme the system already uses goes back to following the system.
+    if (next === (systemLight.matches ? 'light' : 'dark')) localStorage.removeItem('theme');
+    else localStorage.setItem('theme', next);
+  } catch {
+    /* storage blocked: the choice lasts for this visit */
+  }
+  applyTheme(next, true);
+});
+systemLight.addEventListener('change', (e) => {
+  let saved = null;
+  try {
+    saved = localStorage.getItem('theme');
+  } catch {
+    /* ignore */
+  }
+  if (!saved) applyTheme(e.matches ? 'light' : 'dark', true);
+});
+
 // ---------- hero: an upload that finishes, then the next one starts ----------
 const heroJob = {
   card: $('hero-job'),
@@ -168,6 +203,8 @@ async function selectTab(tab, focus) {
     await sleep(260);
     if (run !== switching) return;
   }
+  // The mockup's own tab bar follows along, like switching tabs in the real app.
+  for (const m of document.querySelectorAll('.mock-tab[data-panel]')) m.classList.toggle('on', m.dataset.panel === tab.getAttribute('aria-controls'));
   for (const t of tabs) {
     const panel = $(t.getAttribute('aria-controls'));
     panel.hidden = t !== tab;

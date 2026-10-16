@@ -31,7 +31,7 @@ npm pack
 ```
 
 ```bash
-npm i -g ./swiftstream-0.1.0.tgz
+npm i -g ./swiftstream-<version>.tgz
 ```
 
 After publishing, use `npm i -g swiftstream` instead.
@@ -97,6 +97,7 @@ Install `Swiftstream-Setup-<version>.exe`. Uninstall the old SwiftSSH app first 
 - [ ] **Turning it off:** with auto-restart switched off in Settings, a stopped server shows the red banner with **Start server again**.
 - [ ] **Actions:** add a right-click action in Settings (for example `sudo systemctl restart nginx` on a server), then run it from a server card.
 - [ ] **Closing:** Settings closes with **X** or Esc, back to the tab you were on.
+- [ ] **Theme:** Settings › Appearance switches between Light and Dark straight away, terminals included. **System** follows the Windows setting, and the choice is kept after a restart.
 
 ## 5. Server on Void Linux
 
@@ -119,6 +120,7 @@ npm run publish-site -- <server>
 - [ ] **Downloads:** the page shows the right version, sizes and checksums, and each **Download** button saves a file instead of displaying it.
 - [ ] **Checksum:** on Windows, `certutil -hashfile <file> SHA256` matches the checksum on the page.
 - [ ] **Animations:** the hero skeleton resolves, the upload demo loops, the terminal types itself out, and the app tabs switch.
+- [ ] **Theme:** the sun/moon button switches light and dark with no flash on reload. With nothing chosen, the page follows the system setting.
 - [ ] **Phone size:** the menu button opens the menu, and nothing scrolls sideways.
 - [ ] **404:** a made-up path shows the 404 page.
 - [ ] **Security headers:** `curl -I https://<domain>/` shows them, and `curl -I https://<domain>/downloads/latest.json` isn't cached.

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -207,8 +207,32 @@ handle('state:get', () => loadState());
 handle('state:set', (patch) => {
   const st = { ...loadState(), ...patch };
   writeJson(STATE_FILE, st);
+  if (patch.settings) applyTheme();
   return st;
 });
+
+// Light or dark: 'system' follows Windows. Setting it here also themes the title bar, menus and
+// scrollbars, and the page picks it up through prefers-color-scheme (see renderer/js/theme.js).
+function applyTheme() {
+  const theme = loadState().settings?.theme;
+  nativeTheme.themeSource = theme === 'light' || theme === 'dark' ? theme : 'system';
+  updateWindowColors();
+}
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#0e1013' : '#f7f8fa');
+// The minimize / maximize / close buttons sit on the tab bar, so they take its colors (--bg-deep, --text-2).
+const TAB_BAR_HEIGHT = 45; // the 46px bar minus its bottom border
+const titleBarOverlay = () => ({
+  color: nativeTheme.shouldUseDarkColors ? '#0b0d10' : '#eceef2',
+  symbolColor: nativeTheme.shouldUseDarkColors ? '#a3aab6' : '#434a56',
+  height: TAB_BAR_HEIGHT,
+});
+function updateWindowColors() {
+  if (!win || win.isDestroyed()) return;
+  win.setBackgroundColor(windowBackground());
+  if (process.platform !== 'darwin') win.setTitleBarOverlay(titleBarOverlay());
+}
+// With "System", Windows switching between light and dark changes the buttons too.
+nativeTheme.on('updated', updateWindowColors);
 
 handle('dialog:pick', async (kind) => {
   const result = await dialog.showOpenDialog(win, {
@@ -488,8 +512,11 @@ function createWindow() {
     minWidth: 860,
     minHeight: 520,
     title: 'Swiftstream',
-    backgroundColor: '#0e1013',
+    backgroundColor: windowBackground(),
     autoHideMenuBar: true,
+    // No system title bar: the tab bar is the title bar, with the window buttons drawn on it.
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin' ? {} : { titleBarOverlay: titleBarOverlay() }),
     icon: path.join(dirname, 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(dirname, 'preload.cjs'),
@@ -511,12 +538,23 @@ function createWindow() {
 
   // Headless screenshot mode, used to check the UI during development:
   // SWIFTSTREAM_SHOT=out.png [SWIFTSTREAM_SHOT_JS=script.js] [SWIFTSTREAM_SHOT_WAIT=ms]. Disabled in packaged builds.
+  // If the script returns { input: [...] }, those are sent as real mouse events (sendInputEvent, plus
+  // { wait: ms } pauses), then SWIFTSTREAM_SHOT_AFTER (a script) runs and its result is printed.
   if (!app.isPackaged && process.env.SWIFTSTREAM_SHOT) {
     win.webContents.once('did-finish-load', async () => {
       await sleep(600);
       if (process.env.SWIFTSTREAM_SHOT_JS) {
         const result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSTREAM_SHOT_JS, 'utf8'));
         if (result !== undefined) console.log('shot script result:', JSON.stringify(result));
+        for (const step of result?.input || []) {
+          if (step.wait) await sleep(step.wait);
+          else win.webContents.sendInputEvent(step);
+          await sleep(16);
+        }
+        if (process.env.SWIFTSTREAM_SHOT_AFTER) {
+          const after = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSTREAM_SHOT_AFTER, 'utf8'));
+          console.log('shot after result:', JSON.stringify(after));
+        }
       }
       await sleep(Number(process.env.SWIFTSTREAM_SHOT_WAIT) || 1200);
       fs.writeFileSync(process.env.SWIFTSTREAM_SHOT, (await win.webContents.capturePage()).toPNG());
@@ -526,6 +564,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  applyTheme();
   createWindow();
   scheduleHealth();
 });

@@ -6,6 +6,7 @@
   <title>Swiftstream</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="styles.css">
+  <script src="js/theme.js"></script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -142,15 +143,32 @@
         </div>
 
         <section class="set-group">
+          <h2>Appearance</h2>
+          <div class="set-row">
+            <span><b>Theme</b><small>System follows your Windows light or dark setting.</small></span>
+            <div class="segmented three" role="radiogroup" aria-label="Theme" id="set-theme">
+              <label><input type="radio" name="theme" value="system"><span>System</span></label>
+              <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+              <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+            </div>
+          </div>
+        </section>
+
+        <section class="set-group">
           <h2>Server health</h2>
           <label class="set-row">
             <span><b>Restart Swiftstream automatically</b><small>If a server reboots or Swiftstream stops, the app logs in over SSH with this computer's key and starts it again, then reconnects your terminal. Works for servers set up with an SSH login.</small></span>
             <input type="checkbox" class="switch" id="set-autoheal">
           </label>
-          <label class="set-row">
+          <div class="set-row">
             <span><b>Check servers every</b><small>Open tabs are checked this often; other servers less often.</small></span>
-            <select id="set-interval"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option></select>
-          </label>
+            <div class="segmented four" role="radiogroup" aria-label="Check servers every" id="set-interval">
+              <label><input type="radio" name="interval" value="15"><span>15s</span></label>
+              <label><input type="radio" name="interval" value="30"><span>30s</span></label>
+              <label><input type="radio" name="interval" value="60"><span>1 min</span></label>
+              <label><input type="radio" name="interval" value="120"><span>2 min</span></label>
+            </div>
+          </div>
         </section>
 
         <section class="set-group">

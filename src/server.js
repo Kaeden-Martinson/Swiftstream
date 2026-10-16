@@ -500,9 +500,14 @@ function runShell(ws, url, { root, pty }) {
 
   control({ type: 'hello', pty: wantPty || viaScript, platform: process.platform });
 
+  // Shells get a color terminal. Swiftstream itself runs with NO_COLOR=1 (plain logs), which must not
+  // reach the shell, or pm2, git, npm and friends turn their colors off.
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+  delete env.NO_COLOR;
+
   if (wantPty) {
     const args = cmd ? (isWin ? ['/c', cmd] : ['-c', cmd]) : [];
-    const term = pty.spawn(shell, args, { name: 'xterm-256color', cols, rows, cwd: root, env: process.env });
+    const term = pty.spawn(shell, args, { name: 'xterm-256color', cols, rows, cwd: root, env });
     term.onData((d) => out(1, d));
     term.onExit(({ exitCode }) => onExit(exitCode));
     ws.on('message', (data, isBinary) => {
@@ -517,9 +522,9 @@ function runShell(ws, url, { root, pty }) {
   let child;
   if (viaScript) {
     const [file, args] = scriptCommand(shell, cmd, cols, rows);
-    child = spawn(file, args, { cwd: root, env: { ...process.env, TERM: 'xterm-256color' } });
+    child = spawn(file, args, { cwd: root, env });
   } else {
-    child = cmd ? spawn(cmd, { shell: true, cwd: root, env: process.env }) : spawn(shell, isWin ? [] : ['-i'], { cwd: root, env: process.env });
+    child = cmd ? spawn(cmd, { shell: true, cwd: root, env }) : spawn(shell, isWin ? [] : ['-i'], { cwd: root, env });
   }
   child.stdout.on('data', (d) => out(1, d));
   child.stderr.on('data', (d) => out(2, d));

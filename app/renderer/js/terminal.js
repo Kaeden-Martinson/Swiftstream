@@ -4,21 +4,45 @@
 
 const terminals = new Map(); // terminal id -> session id
 
-const TERM_THEME = {
-  background: '#0e1013',
-  foreground: '#e7e9ec',
-  cursor: '#3ddc97',
-  cursorAccent: '#0e1013',
-  selectionBackground: '#2b4a3d',
-  black: '#1b1f26', brightBlack: '#5d6574',
-  red: '#ff7a7a', brightRed: '#ff9c9c',
-  green: '#3ddc97', brightGreen: '#6fe8b4',
-  yellow: '#f5c35b', brightYellow: '#f8d488',
-  blue: '#6aa8ff', brightBlue: '#94c0ff',
-  magenta: '#d68cff', brightMagenta: '#e3adff',
-  cyan: '#4fd6e0', brightCyan: '#82e4eb',
-  white: '#c9ced6', brightWhite: '#ffffff',
+const TERM_THEMES = {
+  dark: {
+    background: '#0e1013',
+    foreground: '#e7e9ec',
+    cursor: '#3ddc97',
+    cursorAccent: '#0e1013',
+    selectionBackground: '#2b4a3d',
+    black: '#1b1f26', brightBlack: '#5d6574',
+    red: '#ff7a7a', brightRed: '#ff9c9c',
+    green: '#3ddc97', brightGreen: '#6fe8b4',
+    yellow: '#f5c35b', brightYellow: '#f8d488',
+    blue: '#6aa8ff', brightBlue: '#94c0ff',
+    magenta: '#d68cff', brightMagenta: '#e3adff',
+    cyan: '#4fd6e0', brightCyan: '#82e4eb',
+    white: '#c9ced6', brightWhite: '#ffffff',
+  },
+  light: {
+    background: '#f7f8fa',
+    foreground: '#1f242b',
+    cursor: '#0f9d63',
+    cursorAccent: '#f7f8fa',
+    selectionBackground: '#c6ead8',
+    black: '#1f242b', brightBlack: '#6b7380',
+    red: '#c93636', brightRed: '#e05252',
+    green: '#0c8a56', brightGreen: '#12a66a',
+    yellow: '#9a6a12', brightYellow: '#b7811c',
+    blue: '#2563c9', brightBlue: '#3b7be0',
+    magenta: '#9b3fc4', brightMagenta: '#b05ad6',
+    cyan: '#0e7f88', brightCyan: '#14979f',
+    white: '#c9ced6', brightWhite: '#e7e9ec',
+  },
 };
+const termTheme = () => TERM_THEMES[document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'];
+
+// Recolor open terminals when the theme changes.
+window.addEventListener('themechange', () => {
+  for (const session of state.sessions.values()) if (session.term) session.term.xterm.options.theme = termTheme();
+});
+
 
 function ensureTerminal(session) {
   const v = session;
@@ -37,7 +61,7 @@ function ensureTerminal(session) {
     lineHeight: 1.15,
     cursorBlink: true,
     scrollback: 5000,
-    theme: TERM_THEME,
+    theme: termTheme(),
   });
   const fit = new FitAddon.FitAddon();
   xterm.loadAddon(fit);

@@ -126,6 +126,9 @@ try {
 
   r = await ok(['exec', 'box', '--', 'echo', 'hello-from-bootstrap']);
   assert.match(r.out, /hello-from-bootstrap/);
+  // Swiftstream runs with NO_COLOR=1 for plain logs; shells must not inherit it (no colors in pm2, git…).
+  r = await ok(['exec', 'box', '--', 'sh', '-c', '"echo color=[$NO_COLOR] term=$TERM"']);
+  assert.match(r.out, /color=\[\] term=xterm-256color/);
   const file = path.join(work, 'payload.bin');
   fs.writeFileSync(file, crypto.randomBytes(3 * 1024 * 1024));
   await ok(['push', 'box', file, 'payload.bin', '--chunk', '1MB']);

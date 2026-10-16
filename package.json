@@ -1,6 +1,6 @@
 {
   "name": "swiftstream",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Terminal and fast, resumable file transfer for your servers: sign in over SSH once, then everything goes over HTTPS on parallel connections.",
   "keywords": [
     "ssh",
@@ -12,13 +12,13 @@
     "cli",
     "https"
   ],
-  "homepage": "https://github.com/Kaeden-Martinson/SwiftSSH#readme",
+  "homepage": "https://github.com/Kaeden-Martinson/Swiftstream#readme",
   "bugs": {
-    "url": "https://github.com/Kaeden-Martinson/SwiftSSH/issues"
+    "url": "https://github.com/Kaeden-Martinson/Swiftstream/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kaeden-Martinson/SwiftSSH.git"
+    "url": "git+https://github.com/Kaeden-Martinson/Swiftstream.git"
   },
   "license": "MIT",
   "type": "module",

@@ -1,5 +1,5 @@
 node_modules/
-*.swiftssh-part
+*.swiftstream-part
 .test-home/
 app/core/
 app/dist/

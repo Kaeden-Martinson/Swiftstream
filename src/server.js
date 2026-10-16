@@ -174,7 +174,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       if (!state) {
         await fsp.mkdir(path.dirname(dest), { recursive: true });
         // The partial file lives beside the destination so the final rename never crosses filesystems.
-        const partPath = `${dest}.swiftssh-part`;
+        const partPath = `${dest}.swiftstream-part`;
         const fh = await fsp.open(partPath, 'w');
         await fh.truncate(size);
         await fh.close();
@@ -271,7 +271,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       });
       const entries = [];
       for (const ent of ents) {
-        if (ent.name.endsWith('.swiftssh-part')) continue;
+        if (/\.swift(stream|ssh)-part$/.test(ent.name)) continue;
         const st = await fsp.stat(path.join(dir, ent.name)).catch(() => null);
         if (!st) continue; // broken symlink or vanished file
         entries.push({ name: ent.name, isDirectory: st.isDirectory(), size: st.size, mtime: st.mtimeMs });
@@ -415,7 +415,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   }, 60_000);
   sweeper.unref();
 
-  // Abandoned uploads (never completed) leave a .swiftssh-part file and state; clear them after a week.
+  // Abandoned uploads (never completed) leave a .swiftstream-part file and state; clear them after a week.
   const cleanStaleUploads = async () => {
     for (const name of await fsp.readdir(paths.uploads).catch(() => [])) {
       if (!name.endsWith('.json')) continue;

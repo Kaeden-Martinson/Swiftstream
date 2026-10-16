@@ -38,7 +38,6 @@ function paintStatus(name) {
   const info = state.info.get(name);
   const meta = document.querySelector(`.host-card[data-name="${CSS.escape(name)}"] [data-part="os"]`);
   if (meta) meta.textContent = info ? `${platformName(info.platform)} · ${info.hostname}` : status === 'down' ? 'Not reachable' : '';
-  if (name === state.active) renderWorkspaceHeader();
 }
 
 function matches(host, query) {
@@ -100,16 +99,16 @@ function hostCard(host, index) {
   card.querySelector('.host-os').dataset.part = 'os';
   card.addEventListener('click', (e) => {
     if (e.target.closest('.card-edit')) return;
-    openTab(host.name);
+    openSession(host.name, 'terminal', { reuse: true });
   });
-  card.addEventListener('keydown', (e) => e.key === 'Enter' && e.target === card && openTab(host.name));
+  card.addEventListener('keydown', (e) => e.key === 'Enter' && e.target === card && openSession(host.name, 'terminal', { reuse: true }));
   edit.addEventListener('click', () => openEditor(host.name));
   onContextMenu(card, () => [
-    { label: 'Open terminal', icon: 'terminal', run: () => (openTab(host.name), showView('terminal')) },
-    { label: 'Open files', icon: 'files', run: () => (openTab(host.name), showView('files')) },
+    { label: 'New terminal', icon: 'terminal', run: () => openSession(host.name, 'terminal') },
+    { label: 'Browse files', icon: 'files', run: () => openSession(host.name, 'files', { reuse: true }) },
     'separator',
     { label: 'Edit server…', icon: 'pencil', run: () => openEditor(host.name) },
-    { label: 'Restart SwiftSSH', icon: 'refresh', disabled: !host.ssh, run: () => restartServer(host.name) },
+    { label: 'Restart Swiftstream', icon: 'refresh', disabled: !host.ssh, run: () => restartServer(host.name) },
     { label: host.ssh ? 'Copy SSH login' : 'Copy address', icon: 'copy', run: () => (api.copy(host.ssh || host.address), toast('Copied')) },
     ...actionMenuItems('server', { host: host.name }),
     'separator',
@@ -128,8 +127,8 @@ $('search-form').addEventListener('submit', (e) => {
   if (!query) return $('search').focus();
   const visible = state.hosts.filter((h) => matches(h, query));
   const exact = state.hosts.find((h) => h.name === query || h.ssh === query);
-  if (exact) return openTab(exact.name);
-  if (visible.length === 1 && !query.includes('@')) return openTab(visible[0].name);
+  if (exact) return openSession(exact.name, 'terminal', { reuse: true });
+  if (visible.length === 1 && !query.includes('@')) return openSession(visible[0].name, 'terminal', { reuse: true });
   // Looks like a login we haven't saved: set it up.
   if (query.includes('@') || /[.:]/.test(query)) return openAddDialog({ target: query.includes('@') ? query : `root@${query}` });
   toast(visible.length ? 'Pick a server below' : 'No matching server');
@@ -215,7 +214,7 @@ addForm.addEventListener('submit', async (e) => {
       $('search').value = '';
       await loadHosts();
       checkStatus(name);
-      openTab(name);
+      openSession(name, 'terminal');
     } else if (addStep === 'form') {
       const address = f.address.value.trim();
       if (!address) throw { message: "Enter the server's address." };
@@ -226,12 +225,12 @@ addForm.addEventListener('submit', async (e) => {
     } else if (addStep === 'trust') {
       await call(api.hosts.trust(probed.name, probed.url));
       const id = await call(api.identity());
-      $('add-authorize-cmd').textContent = `swiftssh authorize "${id.publicKey}"`;
+      $('add-authorize-cmd').textContent = `swiftstream authorize "${id.publicKey}"`;
       addStep = 'authorize';
     } else {
       $('add-dialog').close();
       await loadHosts();
-      openTab(probed.name);
+      openSession(probed.name, 'terminal');
     }
   } catch (err) {
     setAddError(err);
@@ -242,4 +241,4 @@ addForm.addEventListener('submit', async (e) => {
 });
 
 $('add-cancel').addEventListener('click', () => $('add-dialog').close());
-for (const id of ['new-host', 'empty-add', 'tab-new']) $(id).addEventListener('click', () => openAddDialog());
+for (const id of ['new-host', 'empty-add']) $(id).addEventListener('click', () => openAddDialog());

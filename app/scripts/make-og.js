@@ -14,7 +14,7 @@ const html = `<!doctype html><html><head>
   .lanes { display: flex; flex-direction: column; gap: 9px; width: 300px; }
   .lanes i { display: block; height: 9px; border-radius: 3px; background: #3ddc97; }
 </style></head><body>
-  <div class="logo"><svg width="40" height="40" viewBox="0 0 24 24"><path d="M4.5 6.5L10 12l-5.5 5.5M12.5 17.5h7" fill="none" stroke="#3ddc97" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>SwiftSSH</div>
+  <div class="logo"><svg width="40" height="40" viewBox="0 0 24 24"><path d="M4.5 6.5L10 12l-5.5 5.5M12.5 17.5h7" fill="none" stroke="#3ddc97" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Swiftstream</div>
   <h1>Keep your SSH login. Lose the slow transfers.</h1>
   <div class="foot"><span>Files over HTTPS on 8 connections</span>
     <div class="lanes"><i style="width:94%"></i><i style="width:88%"></i><i style="width:36%;background:#24382f"></i><i style="width:97%"></i><i style="width:91%"></i></div>

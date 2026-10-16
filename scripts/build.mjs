@@ -1,6 +1,6 @@
-// Build swiftssh into:
-//   dist/swiftssh.cjs  one self-contained file (runs with `node swiftssh.cjs`; this is what gets uploaded to servers)
-//   dist/swiftssh(.exe) a standalone executable with Node built in (Node "single executable application")
+// Build swiftstream into:
+//   dist/swiftstream.cjs  one self-contained file (runs with `node swiftstream.cjs`; this is what gets uploaded to servers)
+//   dist/swiftstream(.exe) a standalone executable with Node built in (Node "single executable application")
 //
 //   npm run build            both
 //   npm run build -- --no-exe   just the bundle
@@ -12,20 +12,20 @@ import * as esbuild from 'esbuild';
 const root = path.dirname(import.meta.dirname);
 const dist = path.join(root, 'dist');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const bundlePath = path.join(dist, 'swiftssh.cjs');
-const exeName = process.platform === 'win32' ? 'swiftssh.exe' : 'swiftssh';
+const bundlePath = path.join(dist, 'swiftstream.cjs');
+const exeName = process.platform === 'win32' ? 'swiftstream.exe' : 'swiftstream';
 const exePath = path.join(dist, exeName);
 
 fs.mkdirSync(dist, { recursive: true });
 
 await esbuild.build({
-  entryPoints: [path.join(root, 'bin', 'swiftssh.js')],
+  entryPoints: [path.join(root, 'bin', 'swiftstream.js')],
   outfile: bundlePath,
   bundle: true,
   platform: 'node',
   format: 'cjs',
   target: 'node18',
-  define: { __SWIFTSSH_VERSION__: JSON.stringify(pkg.version) },
+  define: { __SWIFTSTREAM_VERSION__: JSON.stringify(pkg.version) },
   // Optional native add-ons: each is loaded inside a try/catch and has a pure-JS fallback.
   external: ['node-pty', 'cpu-features', 'bufferutil', 'utf-8-validate', '*.node'],
   legalComments: 'none',
@@ -43,7 +43,7 @@ const seaConfig = path.join(dist, 'sea-config.json');
 const blob = path.join(dist, 'sea-prep.blob');
 fs.writeFileSync(
   seaConfig,
-  JSON.stringify({ main: bundlePath, output: blob, disableExperimentalSEAWarning: true, useCodeCache: false, assets: { 'swiftssh.cjs': bundlePath } }, null, 2),
+  JSON.stringify({ main: bundlePath, output: blob, disableExperimentalSEAWarning: true, useCodeCache: false, assets: { 'swiftstream.cjs': bundlePath } }, null, 2),
 );
 execFileSync(process.execPath, ['--experimental-sea-config', seaConfig], { stdio: 'inherit' });
 fs.copyFileSync(process.execPath, exePath);

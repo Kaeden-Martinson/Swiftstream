@@ -9,7 +9,7 @@ import { ensureDir, paths } from './config.js';
 export function loadOrCreateServerCert() {
   ensureDir();
   if (!fs.existsSync(paths.serverKey) || !fs.existsSync(paths.serverCert)) {
-    const pems = selfsigned.generate([{ name: 'commonName', value: `swiftssh@${os.hostname()}` }], {
+    const pems = selfsigned.generate([{ name: 'commonName', value: `swiftstream@${os.hostname()}` }], {
       keySize: 2048,
       days: 3650,
       algorithm: 'sha256',

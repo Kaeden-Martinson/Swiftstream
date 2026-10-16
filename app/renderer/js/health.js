@@ -18,33 +18,33 @@ api.health.onEvent(({ name, status, info, error }) => {
   paintStatus(name);
 
   if (status === 'healing') {
-    toast(`Restarting SwiftSSH on ${name}…`);
-    if (state.active === name) showBanner({ message: `SwiftSSH stopped on ${name}. Restarting it over SSH…`, hint: 'Your terminal reconnects when it is back.' });
+    toast(`Restarting Swiftstream on ${name}…`);
+    if (activeSession()?.host === name) showBanner({ message: `Swiftstream stopped on ${name}. Restarting it over SSH…`, hint: 'Your terminal reconnects when it is back.' });
   } else if (status === 'healed') {
-    toast(`SwiftSSH is running again on ${name}`);
+    toast(`Swiftstream is running again on ${name}`);
     afterRecovered(name);
   } else if (status === 'up' && wasHealing) {
     afterRecovered(name);
-  } else if (status === 'heal-failed' && state.active === name) {
-    showBanner(state.lastError?.err || { message: `Couldn't restart SwiftSSH on ${name}.` });
+  } else if (status === 'heal-failed' && activeSession()?.host === name) {
+    showBanner(state.lastError?.err || { message: `Couldn't restart Swiftstream on ${name}.` });
   }
 });
 
 /** Server is back: clear the banner, reconnect an ended terminal, refresh its files. */
 function afterRecovered(name) {
-  if (state.active === name) {
+  for (const session of sessionsOf(name)) {
+    if (session.term?.ended) {
+      session.term.ended = false;
+      session.term.xterm.write('\r\n\x1b[2mReconnecting…\x1b[0m\r\n');
+      startSession(session);
+    }
+  }
+  // If the visible tab was opened while the server was down, it never loaded: load it now.
+  const active = activeSession();
+  if (active?.host === name) {
     hideBanner();
-    renderWorkspaceHeader();
+    if (active.kind === 'files' && active.remote.listing) refreshPane(active.remote);
+    showSession(active);
   }
-  const v = state.views.get(name);
-  if (v?.term?.ended) {
-    v.term.ended = false;
-    v.term.xterm.write('\r\n\x1b[2mReconnecting…\x1b[0m\r\n');
-    startSession(name);
-  }
-  // If this tab was opened while the server was down, its terminal or files never loaded: load them now.
-  if (state.active === name) {
-    if (v?.view === 'files') refreshPane(v.remote);
-    showView(viewOf(name).view, { animate: false });
-  }
+  renderTabs();
 }

@@ -1,10 +1,11 @@
 {
-  "name": "swiftssh",
+  "name": "swiftstream",
   "version": "0.1.0",
   "description": "Fast, loss-tolerant remote shell and file transfer over HTTPS with SSH-style key auth",
   "type": "module",
   "bin": {
-    "swiftssh": "bin/swiftssh.js"
+    "swiftstream": "bin/swiftstream.js",
+    "sws": "bin/swiftstream.js"
   },
   "files": [
     "bin",

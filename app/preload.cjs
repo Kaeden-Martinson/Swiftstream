@@ -55,5 +55,6 @@ contextBridge.exposeInMainWorld('swift', {
   copy: (text) => call('clipboard:write', text),
   state: { get: () => call('state:get'), set: (patch) => call('state:set', patch) },
   onNav: on('nav'),
+  edit: { open: (name, remotePath, appId) => call('edit:open', name, remotePath, appId), apps: () => call('edit:apps'), onEvent: on('edit') },
   health: { check: (name) => call('health:check', name), heal: (name) => call('health:heal', name), onEvent: on('health') },
 });

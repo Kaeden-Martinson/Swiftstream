@@ -118,7 +118,7 @@ export async function pull(client, remotePath, localPath, opts = {}) {
   if (fs.statSync(localPath, { throwIfNoEntry: false })?.isDirectory()) {
     localPath = path.join(localPath, remoteBasename(info.path));
   }
-  const partPath = `${localPath}.swiftssh-part`;
+  const partPath = `${localPath}.swiftstream-part`;
   await fsp.mkdir(path.dirname(path.resolve(localPath)), { recursive: true });
 
   await withMeter(opts, `pull ${remoteBasename(info.path)}`, info.size, async (meter) => {

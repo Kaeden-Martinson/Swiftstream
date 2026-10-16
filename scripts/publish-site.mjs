@@ -1,16 +1,16 @@
-// Upload the website (including site/downloads from `npm run release`) to a server with SwiftSSH.
+// Upload the website (including site/downloads from `npm run release`) to a server with Swiftstream.
 // Only changed files are sent.
 //
 //   npm run publish-site -- <server> [remote folder]
 //
-// The default remote folder is /var/www/swiftssh, the one deploy/void/install.sh --site serves
-// (and makes writable by the SwiftSSH user).
+// The default remote folder is /var/www/swiftstream, the one deploy/void/install.sh --site serves
+// (and makes writable by the Swiftstream user).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.dirname(import.meta.dirname);
-const [server, remote = '/var/www/swiftssh'] = process.argv.slice(2);
+const [server, remote = '/var/www/swiftstream'] = process.argv.slice(2);
 if (!server) {
   console.error('Usage: npm run publish-site -- <server> [remote folder]');
   process.exit(1);
@@ -22,5 +22,5 @@ if (!fs.existsSync(manifest)) {
 }
 const { version, files } = JSON.parse(fs.readFileSync(manifest, 'utf8'));
 console.log(`Publishing the site with ${files.length} downloads (v${version}) to ${server}:${remote}`);
-const result = spawnSync(process.execPath, [path.join(root, 'bin', 'swiftssh.js'), 'push', server, path.join(root, 'site'), remote], { stdio: 'inherit' });
+const result = spawnSync(process.execPath, [path.join(root, 'bin', 'swiftstream.js'), 'push', server, path.join(root, 'site'), remote], { stdio: 'inherit' });
 process.exit(result.status ?? 1);

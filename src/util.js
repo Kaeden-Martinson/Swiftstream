@@ -26,7 +26,7 @@ export async function walk(dir, base = dir, out = []) {
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) {
       await walk(full, base, out);
-    } else if (ent.isFile() && !ent.name.endsWith('.swiftssh-part')) {
+    } else if (ent.isFile() && !/\.swift(stream|ssh)-part$/.test(ent.name)) {
       const st = await fsp.stat(full);
       out.push({ path: path.relative(base, full).split(path.sep).join('/'), size: st.size, mtime: st.mtimeMs });
     }
@@ -40,7 +40,7 @@ export const sameMtime = (a, b) => Math.floor(a / 1000) === Math.floor(b / 1000)
 /** Write via a temp file + rename so a reader never sees a half-written file. */
 export async function writeFileAtomic(file, data, mtime) {
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  const part = `${file}.swiftssh-part`;
+  const part = `${file}.swiftstream-part`;
   await fsp.writeFile(part, data);
   await fsp.rename(part, file);
   if (mtime) await fsp.utimes(file, new Date(), mtime / 1000);

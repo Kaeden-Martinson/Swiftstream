@@ -1,4 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -67,7 +69,7 @@ function explainForApp(err, name) {
   } catch {
     /* hosts file unreadable; explain without it */
   }
-  if (process.env.SWIFTSSH_DEBUG) console.error(err);
+  if (process.env.SWIFTSTREAM_DEBUG) console.error(err);
   return explainError(err, { name, host, publicKey: loadOrCreateIdentity().publicKeyString });
 }
 
@@ -117,7 +119,7 @@ handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
     port: savedPort(name),
     // Used for this one login (and sudo, if Node.js must be installed). Never stored.
     password: password || undefined,
-    bundlePath: path.join(dirname, 'core', 'swiftssh.cjs'),
+    bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
     // The SSH host key is remembered on first use; a changed key is refused (see core/deploy.js).
     confirmHostKey: async () => true,
     onStep: (text) => send('deploy:step', { name, text }),
@@ -196,8 +198,7 @@ const STATE_FILE = path.join(paths.dir, 'app-state.json');
 const loadState = () => readJson(STATE_FILE, {});
 function renameInState(from, to) {
   const st = loadState();
-  st.openTabs = (st.openTabs || []).map((n) => (n === from ? to : n));
-  if (st.activeTab === from) st.activeTab = to;
+  st.tabs = (st.tabs || []).map((t) => (t.host === from ? { ...t, host: to } : t));
   if (st.remoteCwd?.[from]) (st.remoteCwd[to] = st.remoteCwd[from]), delete st.remoteCwd[from];
   if (st.uploadSpots?.[from]) (st.uploadSpots[to] = st.uploadSpots[from]), delete st.uploadSpots[from];
   writeJson(STATE_FILE, st);
@@ -282,11 +283,11 @@ handle('transfer:upload', async (name, localPaths, remoteDir) => {
 
 handle('transfer:download', async (name, remoteItems, targetDir) => {
   getHostOrExplain(name);
-  // SWIFTSSH_DOWNLOAD_DIR skips the folder picker (used by automated UI checks).
+  // SWIFTSTREAM_DOWNLOAD_DIR skips the folder picker (used by automated UI checks).
   const choice = targetDir
     ? { canceled: false, filePaths: [targetDir] }
-    : !app.isPackaged && process.env.SWIFTSSH_DOWNLOAD_DIR
-    ? { canceled: false, filePaths: [process.env.SWIFTSSH_DOWNLOAD_DIR] }
+    : !app.isPackaged && process.env.SWIFTSTREAM_DOWNLOAD_DIR
+    ? { canceled: false, filePaths: [process.env.SWIFTSTREAM_DOWNLOAD_DIR] }
     : await dialog.showOpenDialog(win, {
         title: 'Download to…',
         defaultPath: app.getPath('downloads'),
@@ -315,7 +316,77 @@ handle('transfer:download', async (name, remoteItems, targetDir) => {
   });
 });
 
-// ---- health: notice a stopped SwiftSSH and restart it over SSH ---------------
+// ---- open a server file in a local app, upload it back when saved -------------
+
+const editRoot = path.join(app.getPath('temp'), 'Swiftstream', 'open');
+const watched = new Map(); // local path -> { host, remotePath, watcher, timer, mtime }
+
+function findEditors() {
+  const editors = [];
+  const local = process.env.LOCALAPPDATA || '';
+  const programFiles = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
+  const vscode = [path.join(local, 'Programs', 'Microsoft VS Code', 'Code.exe'), ...programFiles.map((p) => path.join(p, 'Microsoft VS Code', 'Code.exe'))].find((p) => fs.existsSync(p));
+  if (vscode) editors.push({ id: 'vscode', label: 'VS Code', path: vscode });
+  const notepadpp = programFiles.map((p) => path.join(p, 'Notepad++', 'notepad++.exe')).find((p) => fs.existsSync(p));
+  if (notepadpp) editors.push({ id: 'notepadpp', label: 'Notepad++', path: notepadpp });
+  if (process.platform === 'win32') editors.push({ id: 'notepad', label: 'Notepad', path: 'notepad.exe' });
+  return editors;
+}
+
+function watchForSaves(localPath, host, remotePath) {
+  watched.get(localPath)?.watcher.close();
+  const entry = { host, remotePath, timer: null, mtime: fs.statSync(localPath).mtimeMs };
+  // Editors save in bursts (truncate, write, rename): wait for the file to settle, then upload once.
+  entry.watcher = fs.watch(path.dirname(localPath), (_event, file) => {
+    if (file !== path.basename(localPath)) return;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(async () => {
+      const st = await fsp.stat(localPath).catch(() => null);
+      if (!st || st.mtimeMs === entry.mtime || !(loadState().settings?.uploadOnSave ?? true)) return;
+      entry.mtime = st.mtimeMs;
+      send('edit', { status: 'saving', host, path: remotePath });
+      try {
+        await withClient(host, (c) => push(c, localPath, remotePath, { meter: { add() {}, finish() {}, stop() {} } }));
+        send('edit', { status: 'saved', host, path: remotePath });
+      } catch (err) {
+        send('edit', { status: 'error', host, path: remotePath, error: explainForApp(err, host) });
+      }
+    }, 700);
+  });
+  watched.set(localPath, entry);
+}
+
+handle('edit:apps', () => findEditors().map(({ id, label }) => ({ id, label })));
+
+/** Download a server file to a temp copy, open it, and watch it so saves go back to the server. */
+handle('edit:open', async (name, remotePath, appId = 'default') => {
+  getHostOrExplain(name);
+  const dir = path.join(editRoot, name.replace(/[^\w.-]/g, '_'), crypto.createHash('sha1').update(remotePath).digest('hex').slice(0, 10));
+  await fsp.mkdir(dir, { recursive: true });
+  const localPath = path.join(dir, remoteBasename(remotePath));
+  watched.get(localPath)?.watcher.close(); // don't upload our own download
+  await withClient(name, (c) => pull(c, remotePath, localPath, { meter: { add() {}, finish() {}, stop() {} } }));
+  if (!app.isPackaged && process.env.SWIFTSTREAM_NO_LAUNCH) {
+    // Automated UI checks: download and watch, but don't open an app on the desktop.
+  } else if (appId === 'choose' && process.platform === 'win32') {
+    spawn('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', localPath], { detached: true, stdio: 'ignore' }).unref();
+  } else if (appId !== 'default') {
+    const editor = findEditors().find((e) => e.id === appId);
+    if (!editor) throw new Error('That app was not found on this computer.');
+    spawn(editor.path, [localPath], { detached: true, stdio: 'ignore' }).unref();
+  } else {
+    const failure = await shell.openPath(localPath);
+    if (failure) throw new Error(`Windows couldn't open ${remoteBasename(remotePath)}: ${failure}`);
+  }
+  watchForSaves(localPath, name, remotePath);
+  return { localPath };
+});
+
+app.on('will-quit', () => {
+  for (const entry of watched.values()) entry.watcher.close();
+});
+
+// ---- health: notice a stopped Swiftstream and restart it over SSH ---------------
 
 const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30 };
 const settings = () => ({ ...DEFAULT_SETTINGS, ...(loadState().settings || {}) });
@@ -336,7 +407,7 @@ async function checkHealth(name) {
   }
 }
 
-/** Log in with this computer's key (authorized at setup) and start SwiftSSH again. Never asks for a password. */
+/** Log in with this computer's key (authorized at setup) and start Swiftstream again. Never asks for a password. */
 async function heal(name) {
   const st = healing.get(name) || { busy: false, last: 0 };
   if (st.busy || Date.now() - st.last < HEAL_COOLDOWN_MS) return;
@@ -352,7 +423,7 @@ async function heal(name) {
       target: host.ssh,
       sshPort: host.sshPort,
       port: savedPort(name),
-      bundlePath: path.join(dirname, 'core', 'swiftssh.cjs'),
+      bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
       confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
     });
     send('health', { name, status: 'healed', info });
@@ -370,7 +441,7 @@ function scheduleHealth() {
   healthTimer = setTimeout(async () => {
     healthRound++;
     const hosts = Object.keys(loadHosts());
-    const open = new Set(loadState().openTabs || []);
+    const open = new Set((loadState().tabs || []).map((t) => t.host));
     // Open servers every round; the rest every fifth round.
     const due = hosts.filter((n) => open.has(n) || healthRound % 5 === 0);
     await Promise.all(due.map((n) => checkHealth(n).catch(() => {})));
@@ -416,7 +487,7 @@ function createWindow() {
     height: 780,
     minWidth: 860,
     minHeight: 520,
-    title: 'SwiftSSH',
+    title: 'Swiftstream',
     backgroundColor: '#0e1013',
     autoHideMenuBar: true,
     icon: path.join(dirname, 'build', 'icon.png'),
@@ -439,16 +510,16 @@ function createWindow() {
   win.loadFile(path.join(dirname, 'renderer', 'index.html'));
 
   // Headless screenshot mode, used to check the UI during development:
-  // SWIFTSSH_SHOT=out.png [SWIFTSSH_SHOT_JS=script.js] [SWIFTSSH_SHOT_WAIT=ms]. Disabled in packaged builds.
-  if (!app.isPackaged && process.env.SWIFTSSH_SHOT) {
+  // SWIFTSTREAM_SHOT=out.png [SWIFTSTREAM_SHOT_JS=script.js] [SWIFTSTREAM_SHOT_WAIT=ms]. Disabled in packaged builds.
+  if (!app.isPackaged && process.env.SWIFTSTREAM_SHOT) {
     win.webContents.once('did-finish-load', async () => {
       await sleep(600);
-      if (process.env.SWIFTSSH_SHOT_JS) {
-        const result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSSH_SHOT_JS, 'utf8'));
+      if (process.env.SWIFTSTREAM_SHOT_JS) {
+        const result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSTREAM_SHOT_JS, 'utf8'));
         if (result !== undefined) console.log('shot script result:', JSON.stringify(result));
       }
-      await sleep(Number(process.env.SWIFTSSH_SHOT_WAIT) || 1200);
-      fs.writeFileSync(process.env.SWIFTSSH_SHOT, (await win.webContents.capturePage()).toPNG());
+      await sleep(Number(process.env.SWIFTSTREAM_SHOT_WAIT) || 1200);
+      fs.writeFileSync(process.env.SWIFTSTREAM_SHOT, (await win.webContents.capturePage()).toPNG());
       app.quit();
     });
   }

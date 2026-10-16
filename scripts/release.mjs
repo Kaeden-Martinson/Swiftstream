@@ -1,8 +1,8 @@
 // Build every downloadable file and put them where the website serves them:
 //
-//   site/downloads/SwiftSSH-Setup-<version>.exe     desktop app installer (Windows)
-//   site/downloads/swiftssh-<version>-win-x64.exe   standalone CLI, Node built in
-//   site/downloads/swiftssh-<version>.cjs           portable CLI for any OS with Node 18+
+//   site/downloads/Swiftstream-Setup-<version>.exe     desktop app installer (Windows)
+//   site/downloads/swiftstream-<version>-win-x64.exe   standalone CLI, Node built in
+//   site/downloads/swiftstream-<version>.cjs           portable CLI for any OS with Node 18+
 //   site/downloads/SHA256SUMS.txt                   checksums, in sha256sum format
 //   site/downloads/latest.json                      what the website reads for links and sizes
 //
@@ -37,15 +37,15 @@ const add = (source, name, kind, label) => {
 
 step('Building the CLI (bundle and standalone executable)');
 run(process.execPath, [path.join(root, 'scripts', 'build.mjs')]);
-if (process.platform === 'win32') add(path.join(root, 'dist', 'swiftssh.exe'), `swiftssh-${version}-win-x64.exe`, 'cli-exe', 'Command line, Windows 64-bit');
-add(path.join(root, 'dist', 'swiftssh.cjs'), `swiftssh-${version}.cjs`, 'cli-portable', 'Command line, any system with Node.js 18+');
+if (process.platform === 'win32') add(path.join(root, 'dist', 'swiftstream.exe'), `swiftstream-${version}-win-x64.exe`, 'cli-exe', 'Command line, Windows 64-bit');
+add(path.join(root, 'dist', 'swiftstream.cjs'), `swiftstream-${version}.cjs`, 'cli-portable', 'Command line, any system with Node.js 18+');
 
 if (!process.argv.includes('--no-app')) {
   step('Building the desktop app installer');
   run(npm, ['run', 'sync-core'], appDir);
   // Its own output folder, so a copy of the app running from app/dist doesn't lock the build.
   run(npm, ['exec', '--', 'electron-builder', '--win', '--publish', 'never', '--config.directories.output=release'], appDir);
-  add(path.join(appDir, 'release', `SwiftSSH-Setup-${appVersion}.exe`), `SwiftSSH-Setup-${appVersion}.exe`, 'app-windows', 'Desktop app, Windows 64-bit');
+  add(path.join(appDir, 'release', `Swiftstream-Setup-${appVersion}.exe`), `Swiftstream-Setup-${appVersion}.exe`, 'app-windows', 'Desktop app, Windows 64-bit');
 }
 
 // Keep entries for files built in an earlier run (e.g. the installer when using --no-app).

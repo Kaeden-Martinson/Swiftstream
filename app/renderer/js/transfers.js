@@ -73,5 +73,5 @@ api.transfers.onDone(({ id, error, revealPath }) => {
   }
   onTransferFinished(job); // files.js: refresh the panes that changed
   job.finished = true;
-  scheduleDismiss(id, revealPath ? 8000 : 4000);
+  scheduleDismiss(id, 1000);
 });

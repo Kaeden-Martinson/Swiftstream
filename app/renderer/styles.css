@@ -155,8 +155,8 @@ svg { width: 16px; height: 16px; flex: none; }
 .fp-list.dropping { box-shadow: inset 0 0 0 2px var(--accent); background: rgba(61, 220, 151, 0.04); }
 .ftable { width: 100%; border-collapse: collapse; font-size: 13.5px; table-layout: fixed; }
 .ftable th { position: sticky; top: 0; z-index: 1; background: var(--bg); text-align: left; font-weight: 500; color: var(--faint); font-size: 12px; padding: 7px 14px; border-bottom: 1px solid var(--line); }
-.ftable th:nth-child(2) { width: 84px; }
-.ftable th:nth-child(3) { width: 150px; }
+.ftable th:nth-child(2) { width: 82px; }
+.ftable th:nth-child(3) { width: 196px; }
 .ftable td { padding: 6px 14px; border-bottom: 1px solid #171a20; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ftable .num { text-align: right; font-variant-numeric: tabular-nums; }
 .ftable td.muted { color: var(--muted); }
@@ -283,10 +283,12 @@ input::placeholder { color: var(--faint); }
 @keyframes menu-out { to { opacity: 0; } }
 
 /* ---------- filter box and editable path ---------- */
-.fp-filter { display: flex; align-items: center; gap: 6px; width: 170px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); transition: border-color .15s, width .2s var(--ease); }
-.fp-filter:focus-within { border-color: #4a5262; width: 210px; }
+.fp-filter { display: flex; align-items: center; gap: 6px; width: 190px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); cursor: text; transition: border-color .15s, box-shadow .15s; }
+.fp-filter:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fp-filter:focus-within svg { color: var(--accent); }
+.fp-filter input:focus-visible { outline: none; }
 .fp-filter svg { width: 14px; height: 14px; color: var(--faint); }
-.fp-filter input { height: 100%; border: 0; padding: 0; background: transparent; font-size: 13px; outline: none; }
+.fp-filter input { height: 100%; border: 0; padding: 0; background: transparent; font-size: 13px; outline: none; min-width: 0; }
 .crumbs { cursor: text; border-radius: 6px; }
 .crumbs:hover:not(.editing) { background: rgba(255, 255, 255, 0.02); }
 .crumbs.editing { overflow: visible; }
@@ -324,3 +326,29 @@ select { height: 32px; border-radius: 6px; border: 1px solid var(--line-strong);
 .action-row { display: grid; grid-template-columns: minmax(0, 0.9fr) 100px minmax(0, 1.4fr) 30px; gap: 8px; align-items: center; animation: fade-up .2s var(--ease) both; }
 .action-row input { height: 32px; font-size: 13px; }
 .action-row input.mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* ---------- session tabs and the new-tab menu ---------- */
+.tab-kind { position: relative; display: inline-grid; place-items: center; }
+.tab-kind svg { width: 15px; height: 15px; color: var(--muted); }
+.srv-tab.active .tab-kind svg { color: var(--accent); }
+.tab-kind .dot { position: absolute; right: -3px; bottom: -2px; width: 7px; height: 7px; box-shadow: 0 0 0 2px var(--bg-deep); }
+.srv-tab.active .tab-kind .dot { box-shadow: 0 0 0 2px var(--panel-2); }
+.new-tab-menu { width: 360px; max-width: calc(100vw - 16px); padding: 8px; }
+.ntm-title { font-size: 12px; font-weight: 600; color: var(--muted); padding: 2px 4px 8px; }
+.ntm-search { height: 32px; font-size: 13px; margin-bottom: 6px; }
+.ntm-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ntm-row { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 7px; }
+.ntm-row:hover { background: var(--panel-3); }
+.ntm-name { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.25; }
+.ntm-name b { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ntm-name small { color: var(--faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ntm-row .btn { height: 26px; padding: 0 8px; font-size: 12px; gap: 5px; }
+.ntm-row .btn svg { width: 13px; height: 13px; }
+.ntm-empty { padding: 12px 6px; font-size: 13px; }
+.workspace > .banner { margin-top: 12px; }
+
+/* ---------- settings close ---------- */
+.settings-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+.settings-top h1 { margin: 0; }
+.settings-close { width: 34px; height: 34px; border: 1px solid var(--line-strong); }
+.settings-close svg { width: 16px; height: 16px; }

@@ -20,7 +20,7 @@ export function getHostOrExplain(name) {
   const guess = closest(name, names);
   throw new UserError(
     `There's no saved host called "${name}".`,
-    guess ? `Did you mean "${guess}"?` : names.length ? `Your hosts: ${names.join(', ')}` : 'Add one with "swiftssh setup".',
+    guess ? `Did you mean "${guess}"?` : names.length ? `Your hosts: ${names.join(', ')}` : 'Add one with "swiftstream setup".',
   );
 }
 
@@ -34,7 +34,7 @@ export function removeHost(name) {
 
 /**
  * Change a saved server: rename it, move it to a group, or update its address or SSH login.
- * The pinned certificate stays, so a new address must still be the same SwiftSSH server.
+ * The pinned certificate stays, so a new address must still be the same Swiftstream server.
  * Returns the (possibly new) name.
  */
 export function updateHost(name, changes) {
@@ -99,7 +99,7 @@ export function saveProbedHost(name, probe) {
 }
 
 /**
- * Log in to a server over SSH (key or password), start swiftssh there, authorize this computer,
+ * Log in to a server over SSH (key or password), start swiftstream there, authorize this computer,
  * and save it. See deployOverSsh for the callbacks (askPassword, confirmHostKey, onStep).
  */
 export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, ...sshOptions }) {
@@ -121,7 +121,7 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
   if (sshPort && Number(sshPort) !== 22) host.sshPort = Number(sshPort);
   else delete host.sshPort;
   saveHost(name, host);
-  sshOptions.onStep?.('Connecting to SwiftSSH');
+  sshOptions.onStep?.('Connecting to Swiftstream');
   let client;
   try {
     client = await connectClient(host, identity);
@@ -129,8 +129,8 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
   } catch (err) {
     if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message)) {
       throw new UserError(
-        `SwiftSSH is running on ${ready.host}, but port ${ready.port} can't be reached from here.`,
-        `Open ${ready.port}/tcp in the server's firewall (for example "sudo ufw allow ${ready.port}/tcp", or your cloud provider's security group), then run "swiftssh connect ${name}".`,
+        `Swiftstream is running on ${ready.host}, but port ${ready.port} can't be reached from here.`,
+        `Open ${ready.port}/tcp in the server's firewall (for example "sudo ufw allow ${ready.port}/tcp", or your cloud provider's security group), then run "swiftstream connect ${name}".`,
       );
     }
     throw err;

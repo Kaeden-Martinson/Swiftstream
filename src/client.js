@@ -9,7 +9,7 @@ export class HttpError extends Error {
   }
 }
 
-/** Authenticated HTTPS client for one pinned swiftssh host. */
+/** Authenticated HTTPS client for one pinned swiftstream host. */
 export class SwiftClient {
   constructor(host, { parallel = 8 } = {}) {
     this.host = host;
@@ -22,12 +22,20 @@ export class SwiftClient {
   }
 
   async login(identity) {
-    const { nonce } = await this.request('POST', '/v1/auth/challenge');
-    const signature = sign(identity.privateKey, authMessage(nonce, this.host.fingerprint));
-    const { token } = await this.request('POST', '/v1/auth/verify', {
-      body: { publicKey: identity.publicKeyString, nonce, signature },
-    });
-    this.token = token;
+    const attempt = async (publicKey) => {
+      const { nonce } = await this.request('POST', '/v1/auth/challenge');
+      const signature = sign(identity.privateKey, authMessage(nonce, this.host.fingerprint));
+      return this.request('POST', '/v1/auth/verify', { body: { publicKey, nonce, signature } });
+    };
+    let result;
+    try {
+      result = await attempt(identity.publicKeyString);
+    } catch (err) {
+      // A server from before the rename only recognises the old key type name; same key, old label.
+      if (err.status !== 401 || !/not authorized/.test(err.message)) throw err;
+      result = await attempt(identity.publicKeyString.replace(/^swiftstream-ed25519 /, 'swiftssh-ed25519 '));
+    }
+    this.token = result.token;
     return this;
   }
 

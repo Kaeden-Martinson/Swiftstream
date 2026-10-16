@@ -1,66 +1,107 @@
 'use strict';
-// Tabs (one per open server), the server workspace header, the error banner, and the editor.
+// Tabs are sessions: each is a terminal or a file browser for one server, and a server can have
+// several of each. Also here: the new-tab menu, the error banner, restarts, and the server editor.
 
-// ---------- tabs ----------
+// ---------- sessions and tabs ----------
+
+let nextSessionId = 1;
+
+function createSession(host, kind) {
+  const session = { id: `s${nextSessionId++}`, host, kind, term: null, remote: kind === 'files' ? newPane('remote', host) : null };
+  state.sessions.set(session.id, session);
+  state.tabs.push(session.id);
+  return session;
+}
+
+const sessionsOf = (host) => [...state.sessions.values()].filter((s) => s.host === host);
+
+/** Open a terminal or files tab for a server. With reuse, focus an existing one of that kind instead. */
+function openSession(host, kind, { reuse = false } = {}) {
+  if (!hostByName(host)) return null;
+  const existing = reuse && state.tabs.map((id) => state.sessions.get(id)).find((s) => s.host === host && s.kind === kind);
+  const session = existing || createSession(host, kind);
+  activate(session.id);
+  return session;
+}
+
+function tabLabel(session) {
+  const same = state.tabs.map((id) => state.sessions.get(id)).filter((s) => s.host === session.host && s.kind === session.kind);
+  const n = same.indexOf(session) + 1;
+  return same.length > 1 ? `${session.host} ${n}` : session.host;
+}
 
 function renderTabs() {
   $('tab-home').classList.toggle('active', state.page === 'home');
   $('tab-settings').classList.toggle('active', state.page === 'settings');
   $('open-tabs').replaceChildren(
-    ...state.openTabs.map((name) => {
-      const dot = el('span', { className: `dot ${state.status.get(name) || 'unknown'}` });
-      dot.dataset.statusFor = name;
-      const close = el('span', { className: 'tab-close', title: `Close ${name}`, role: 'button', ariaLabel: `Close ${name}` }, icon('x'));
-      const tab = el('button', { type: 'button', role: 'tab', className: `srv-tab${name === state.active ? ' active' : ''}`, ariaSelected: String(name === state.active) }, dot, el('span', { className: 'tab-name', textContent: name }), close);
-      tab.addEventListener('click', (e) => (e.target.closest('.tab-close') ? closeTab(name) : activate(name)));
-      tab.addEventListener('auxclick', (e) => e.button === 1 && closeTab(name)); // middle-click closes
+    ...state.tabs.map((id) => {
+      const session = state.sessions.get(id);
+      const active = state.page === 'session' && state.activeTab === id;
+      const dot = el('span', { className: `dot ${state.status.get(session.host) || 'unknown'}` });
+      dot.dataset.statusFor = session.host;
+      const close = el('span', { className: 'tab-close', title: 'Close tab', role: 'button', ariaLabel: 'Close tab' }, icon('x'));
+      const tab = el(
+        'button',
+        { type: 'button', role: 'tab', className: `srv-tab${active ? ' active' : ''}`, ariaSelected: String(active), title: tabTitle(session) },
+        el('span', { className: 'tab-kind' }, icon(session.kind === 'files' ? 'files' : 'terminal'), dot),
+        el('span', { className: 'tab-name', textContent: tabLabel(session) }),
+        close,
+      );
+      tab.addEventListener('click', (e) => (e.target.closest('.tab-close') ? closeTab(id) : activate(id)));
+      tab.addEventListener('auxclick', (e) => e.button === 1 && closeTab(id)); // middle-click closes
       onContextMenu(tab, () => [
-        { label: 'Terminal', icon: 'terminal', run: () => (activate(name), showView('terminal')) },
-        { label: 'Files', icon: 'files', run: () => (activate(name), showView('files')) },
+        { label: 'New terminal', icon: 'terminal', run: () => openSession(session.host, 'terminal') },
+        { label: 'New file browser', icon: 'files', run: () => openSession(session.host, 'files') },
         'separator',
-        { label: 'Edit server…', icon: 'pencil', run: () => openEditor(name) },
-        { label: 'Restart SwiftSSH', icon: 'refresh', disabled: !hostByName(name)?.ssh, run: () => restartServer(name) },
+        { label: 'Edit server…', icon: 'pencil', run: () => openEditor(session.host) },
+        { label: 'Restart Swiftstream', icon: 'refresh', disabled: !hostByName(session.host)?.ssh, run: () => restartServer(session.host) },
         'separator',
-        { label: 'Close tab', icon: 'x', hint: 'Ctrl+W', run: () => closeTab(name) },
-        { label: 'Close other tabs', disabled: state.openTabs.length < 2, run: () => state.openTabs.filter((n) => n !== name).forEach(closeTab) },
+        { label: 'Close tab', icon: 'x', hint: 'Ctrl+W', run: () => closeTab(id) },
+        { label: 'Close other tabs', disabled: state.tabs.length < 2, run: () => state.tabs.filter((t) => t !== id).forEach(closeTab) },
       ]);
       return tab;
     }),
   );
 }
 
-function openTab(name) {
-  if (!hostByName(name)) return;
-  if (!state.openTabs.includes(name)) state.openTabs.push(name);
-  activate(name);
+function tabTitle(session) {
+  const host = hostByName(session.host);
+  const info = state.info.get(session.host);
+  const kind = session.kind === 'files' ? 'Files' : 'Terminal';
+  return [`${kind} · ${session.host}`, host?.address, info && `${info.hostname} · ${platformName(info.platform)}`].filter(Boolean).join('\n');
 }
 
-function closeTab(name) {
-  const i = state.openTabs.indexOf(name);
+function closeTab(id) {
+  const i = state.tabs.indexOf(id);
   if (i < 0) return;
-  state.openTabs.splice(i, 1);
-  disposeTerminal(name);
-  if (state.active === name) activate(state.openTabs[Math.min(i, state.openTabs.length - 1)] ?? null);
+  const session = state.sessions.get(id);
+  state.tabs.splice(i, 1);
+  disposeTerminal(session);
+  state.sessions.delete(id);
+  if (state.page === 'session' && state.activeTab === id) activate(state.tabs[Math.min(i, state.tabs.length - 1)] ?? null);
   else persistTabs();
   renderTabs();
 }
 
 function persistTabs() {
-  saveState({ openTabs: state.openTabs, activeTab: state.active });
+  const tabs = state.tabs.map((id) => state.sessions.get(id)).map(({ host, kind }) => ({ host, kind }));
+  saveState({ tabs, activeIndex: state.page === 'session' ? state.tabs.indexOf(state.activeTab) : -1 });
 }
 
-/** Show a server tab, the servers home (null), or the settings page (SETTINGS_PAGE). */
-async function activate(name) {
-  const page = name === null ? 'home' : name === SETTINGS_PAGE ? 'settings' : 'server';
-  if (page === 'server' && !state.openTabs.includes(name)) state.openTabs.push(name); // a shown server always has a tab
+const activeSession = () => (state.page === 'session' ? state.sessions.get(state.activeTab) || null : null);
+
+/** Show a session tab (by id), the servers home (null), or the settings page (SETTINGS_PAGE). */
+async function activate(target) {
+  const page = target === null ? 'home' : target === SETTINGS_PAGE ? 'settings' : 'session';
+  if (page !== 'settings') state.returnTo = target; // where the settings close button goes back to
   state.page = page;
-  state.active = page === 'server' ? name : null;
+  if (page === 'session') state.activeTab = target;
+  closeNewTabMenu();
   persistTabs();
   renderTabs();
   $('home').hidden = page !== 'home';
   $('settings').hidden = page !== 'settings';
-  $('workspace').hidden = page !== 'server';
-  for (const t of document.querySelectorAll('#terminal-pane > .term')) t.hidden = t.dataset.host !== name;
+  $('workspace').hidden = page !== 'session';
   if (page === 'settings') {
     renderSettings();
     replayAnimation($('settings'), 'pane-enter');
@@ -72,16 +113,27 @@ async function activate(name) {
     replayAnimation($('home'), 'pane-enter');
     return;
   }
+  const session = activeSession();
   replayAnimation($('workspace'), 'pane-enter');
   hideBanner();
-  renderWorkspaceHeader();
-  showView(viewOf(name).view, { animate: false });
-  if (state.status.get(name) !== 'up') {
-    const status = await checkStatus(name);
-    if (state.active !== name) return;
-    if (status === 'down' && state.lastError?.name === name) showBanner(state.lastError.err);
-    else showView(viewOf(name).view, { animate: false });
+  showSession(session);
+  if (state.status.get(session.host) !== 'up') {
+    const status = await checkStatus(session.host);
+    if (activeSession() !== session) return;
+    if (status === 'down' && state.lastError?.name === session.host) showBanner(state.lastError.err);
+    else showSession(session);
   }
+}
+
+/** Show the active session's terminal or file browser, starting it if the server is up. */
+function showSession(session) {
+  if (!session) return;
+  $('terminal-pane').hidden = session.kind !== 'terminal';
+  $('files-pane').hidden = session.kind !== 'files';
+  for (const t of document.querySelectorAll('#terminal-pane > .term')) t.hidden = t.dataset.session !== session.id;
+  if (state.status.get(session.host) !== 'up') return;
+  if (session.kind === 'terminal') ensureTerminal(session);
+  else openFilesFor(session);
 }
 
 $('tab-home').addEventListener('click', () => activate(null));
@@ -91,52 +143,73 @@ window.addEventListener('keydown', (e) => {
   if (!e.ctrlKey) return;
   if (e.key === 'Tab') {
     e.preventDefault();
-    const order = [null, ...state.openTabs];
-    const i = order.indexOf(state.page === 'server' ? state.active : null);
+    const order = [null, ...state.tabs];
+    const i = order.indexOf(state.page === 'session' ? state.activeTab : null);
     activate(order[(i + (e.shiftKey ? -1 : 1) + order.length) % order.length]);
-  } else if (e.key.toLowerCase() === 'w' && state.active) {
+  } else if (e.key.toLowerCase() === 'w' && activeSession()) {
     e.preventDefault();
-    closeTab(state.active);
+    closeTab(state.activeTab);
+  } else if (e.key.toLowerCase() === 't') {
+    e.preventDefault();
+    showNewTabMenu();
   }
 });
 
-// ---------- workspace ----------
+// ---------- the + menu: a terminal or file browser for any server ----------
 
-function renderWorkspaceHeader() {
-  const name = state.active;
-  const host = hostByName(name);
-  if (!host) return;
-  const info = state.info.get(name);
-  const status = state.status.get(name) || 'unknown';
-  $('ws-dot').className = `dot ${status}`;
-  $('ws-dot').dataset.statusFor = name;
-  $('ws-name').textContent = name;
-  const sub = $('ws-sub');
-  if (info) sub.replaceChildren(`${host.address}  ·  ${info.hostname} · ${platformName(info.platform)} · swiftssh ${info.version}`);
-  else if (status === 'checking') sub.replaceChildren(`${host.address}  ·  `, skeleton('180px', 'sk-inline'));
-  else sub.replaceChildren(host.address);
+let newTabMenu = null;
+
+function closeNewTabMenu() {
+  newTabMenu?.remove();
+  newTabMenu = null;
+  window.removeEventListener('pointerdown', onNewTabOutside, true);
 }
 
-function showView(viewName, { animate = true } = {}) {
-  const name = state.active;
-  if (!name) return;
-  const v = viewOf(name);
-  const changed = v.view !== viewName;
-  v.view = viewName;
-  for (const b of document.querySelectorAll('.seg [data-view]')) {
-    const on = b.dataset.view === viewName;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-selected', String(on));
-  }
-  $('terminal-pane').hidden = viewName !== 'terminal';
-  $('files-pane').hidden = viewName !== 'files';
-  if (animate && changed) replayAnimation($(viewName === 'terminal' ? 'terminal-pane' : 'files-pane'), 'pane-enter');
-  if (state.status.get(name) !== 'up') return;
-  if (viewName === 'terminal') ensureTerminal(name);
-  else openFilesFor(name);
+function onNewTabOutside(e) {
+  if (newTabMenu && !newTabMenu.contains(e.target) && !e.target.closest('#tab-new')) closeNewTabMenu();
 }
 
-for (const b of document.querySelectorAll('.seg [data-view]')) b.addEventListener('click', () => showView(b.dataset.view));
+function showNewTabMenu() {
+  if (newTabMenu) return closeNewTabMenu();
+  closeMenu();
+  const search = el('input', { className: 'ntm-search', placeholder: 'Find a server', spellcheck: false, ariaLabel: 'Find a server' });
+  const list = el('div', { className: 'ntm-list' });
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    const hosts = state.hosts.filter((h) => !q || [h.name, h.address, h.group].some((v) => v && v.toLowerCase().includes(q)));
+    list.replaceChildren(
+      ...hosts.map((h) => {
+        const dot = el('span', { className: `dot ${state.status.get(h.name) || 'unknown'}` });
+        const term = el('button', { type: 'button', className: 'btn btn-small', title: `New terminal on ${h.name}` }, icon('terminal'), 'Terminal');
+        const files = el('button', { type: 'button', className: 'btn btn-small', title: `Browse files on ${h.name}` }, icon('files'), 'Files');
+        term.addEventListener('click', () => openSession(h.name, 'terminal'));
+        files.addEventListener('click', () => openSession(h.name, 'files'));
+        return el('div', { className: 'ntm-row' }, dot, el('span', { className: 'ntm-name' }, el('b', { textContent: h.name }), el('small', { textContent: h.address })), term, files);
+      }),
+      ...(hosts.length ? [] : [el('p', { className: 'ntm-empty muted', textContent: state.hosts.length ? 'No servers match.' : 'No servers yet.' })]),
+    );
+  };
+  search.addEventListener('input', render);
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeNewTabMenu();
+    if (e.key === 'Enter') list.querySelector('.ntm-row .btn')?.click(); // first server's terminal
+  });
+  const add = el('button', { type: 'button', className: 'ctx-item' }, icon('plus'), el('span', { className: 'ctx-label', textContent: 'Add a server…' }));
+  add.addEventListener('click', () => {
+    closeNewTabMenu();
+    openAddDialog();
+  });
+  newTabMenu = el('div', { className: 'ctx-menu new-tab-menu', role: 'dialog', ariaLabel: 'New tab' }, el('div', { className: 'ntm-title', textContent: 'New tab' }), search, list, el('div', { className: 'ctx-sep' }), add);
+  render();
+  document.body.append(newTabMenu);
+  const r = $('tab-new').getBoundingClientRect();
+  newTabMenu.style.left = `${Math.min(r.left, window.innerWidth - newTabMenu.offsetWidth - 8)}px`;
+  newTabMenu.style.top = `${r.bottom + 6}px`;
+  search.focus();
+  setTimeout(() => window.addEventListener('pointerdown', onNewTabOutside, true));
+}
+
+$('tab-new').addEventListener('click', showNewTabMenu);
 
 // ---------- error banner ----------
 
@@ -144,10 +217,10 @@ let bannerAction = null;
 function showBanner(err) {
   $('banner').hidden = false;
   $('banner-message').textContent = err.message;
-  const host = hostByName(state.active);
+  const host = hostByName(activeSession()?.host);
   bannerAction = err.action === 'redeploy' && host?.ssh ? () => redeploy(host) : null;
   // The CLI hint names a command; in the app the button does it.
-  $('banner-hint').textContent = bannerAction ? `SwiftSSH can log in to ${host.ssh} over SSH and start it again.` : err.hint || '';
+  $('banner-hint').textContent = bannerAction ? `Swiftstream can log in to ${host.ssh} over SSH and start it again.` : err.hint || '';
   $('banner-action').hidden = !bannerAction;
   $('banner-action').textContent = 'Start server again';
 }
@@ -157,24 +230,23 @@ function hideBanner() {
 }
 
 $('banner-retry').addEventListener('click', async () => {
-  const name = state.active;
-  if (!name) return;
+  const session = activeSession();
+  if (!session) return;
   hideBanner();
-  const status = await checkStatus(name);
-  if (state.active !== name) return;
+  const status = await checkStatus(session.host);
+  if (activeSession() !== session) return;
   if (status === 'down') showBanner(state.lastError.err);
-  else showView(viewOf(name).view, { animate: false });
+  else showSession(session);
 });
 $('banner-action').addEventListener('click', () => bannerAction?.());
 
-/** Restart SwiftSSH on a server over SSH (menus); asks for a password only if its key isn't accepted. */
+/** Restart Swiftstream on a server over SSH (menus); asks for a password only if its key isn't accepted. */
 async function restartServer(name) {
   const host = hostByName(name);
   if (!host?.ssh) return toast('Add an SSH login for this server first (Edit server)');
-  toast(`Restarting SwiftSSH on ${name}…`);
+  toast(`Restarting Swiftstream on ${name}…`);
   state.status.set(name, 'healing');
   paintStatus(name);
-  if (state.active !== name) openTab(name);
   await redeploy(host);
 }
 
@@ -188,24 +260,24 @@ async function redeploy(host) {
       await deploy(); // an SSH key may be enough
     } catch (err) {
       if (!/was refused/.test(err.message)) throw err;
-      const password = await prompt({ title: `Log in to ${host.ssh}`, text: 'Enter the SSH password to start SwiftSSH again. It is used once and not saved.', ok: 'Start server', secret: true });
+      const password = await prompt({ title: `Log in to ${host.ssh}`, text: 'Enter the SSH password to start Swiftstream again. It is used once and not saved.', ok: 'Start server', secret: true });
       if (!password) return;
       await deploy(password);
     }
     hideBanner();
     await checkStatus(host.name);
-    toast(`SwiftSSH is running on ${host.name}`);
+    toast(`Swiftstream is running on ${host.name}`);
     afterRecovered(host.name);
-    if (state.active === host.name) showView(viewOf(host.name).view, { animate: false });
   } catch (err) {
-    showBanner(err);
+    if (activeSession()?.host === host.name) showBanner(err);
+    else toast(err.message);
   } finally {
     button.disabled = false;
     button.textContent = 'Start server again';
   }
 }
 
-// ---------- edit a server ----------
+// ---------- edit a server (from the Servers page and tab menus) ----------
 
 const editForm = $('edit-form');
 let editing = null;
@@ -239,10 +311,7 @@ editForm.addEventListener('submit', async (e) => {
     if (newName !== oldName) renameEverywhere(oldName, newName);
     state.saved = await call(api.state.get());
     await loadHosts();
-    if (state.active === newName) {
-      renderWorkspaceHeader();
-      checkStatus(newName);
-    }
+    checkStatus(newName);
     toast(`Saved ${newName}`);
   } catch (err) {
     const box = $('edit-error');
@@ -253,22 +322,17 @@ editForm.addEventListener('submit', async (e) => {
 
 /** Move all in-memory state for a renamed server to its new name. */
 function renameEverywhere(from, to) {
-  const v = state.views.get(from);
-  if (v) {
-    state.views.delete(from);
-    state.views.set(to, v);
-    v.remote.host = to;
-    if (v.term) v.term.container.dataset.host = to;
+  for (const session of sessionsOf(from)) {
+    session.host = to;
+    if (session.remote) session.remote.host = to;
   }
-  for (const [id, name] of terminals) if (name === from) terminals.set(id, to);
   for (const map of [state.status, state.info]) {
     if (map.has(from)) {
       map.set(to, map.get(from));
       map.delete(from);
     }
   }
-  state.openTabs = state.openTabs.map((n) => (n === from ? to : n));
-  if (state.active === from) state.active = to;
+  persistTabs();
 }
 
 $('edit-cancel').addEventListener('click', () => $('edit-dialog').close());
@@ -278,14 +342,12 @@ $('edit-remove').addEventListener('click', () => {
 });
 
 async function removeServer(name) {
-  const yes = await confirmDialog(`Remove ${name}?`, 'SwiftSSH forgets this server. Nothing on the server is changed, and you can add it again later.', 'Remove', true);
+  const yes = await confirmDialog(`Remove ${name}?`, 'Swiftstream forgets this server. Nothing on the server is changed, and you can add it again later.', 'Remove', true);
   if (!yes) return;
   await call(api.hosts.remove(name));
-  closeTab(name);
-  state.views.delete(name);
+  for (const session of sessionsOf(name)) closeTab(session.id);
   state.status.delete(name);
   state.info.delete(name);
   await loadHosts();
   toast(`Removed ${name}`);
 }
-$('ws-edit').addEventListener('click', () => state.active && openEditor(state.active));

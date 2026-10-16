@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { ensureDir, paths } from './config.js';
 
-const KEY_TYPE = 'swiftssh-ed25519';
+const KEY_TYPE = 'swiftstream-ed25519';
+// Keys written before the rename say "swiftssh-ed25519"; they are the same keys.
+const LEGACY_KEY_TYPE = 'swiftssh-ed25519';
 
 export function loadOrCreateIdentity() {
   ensureDir();
@@ -19,18 +21,19 @@ export function encodePublicKey(publicKey) {
   return `${KEY_TYPE} ${publicKey.export({ type: 'spki', format: 'der' }).toString('base64')}`;
 }
 
-/** Parses "swiftssh-ed25519 <base64> [comment]" into a KeyObject. */
+/** Parses "swiftstream-ed25519 <base64> [comment]" into a KeyObject. */
 export function decodePublicKey(line) {
   const [type, b64] = line.trim().split(/\s+/);
-  if (type !== KEY_TYPE || !b64) throw new Error('Not a swiftssh public key');
+  if ((type !== KEY_TYPE && type !== LEGACY_KEY_TYPE) || !b64) throw new Error('Not a swiftstream public key');
   const key = crypto.createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' });
   if (key.asymmetricKeyType !== 'ed25519') throw new Error('Only ed25519 keys are supported');
   return key;
 }
 
-/** Canonical "type base64" form, without any trailing comment. */
+/** Canonical "type base64" form, without any trailing comment (old-name keys compare equal to new). */
 export function normalizePublicKey(line) {
-  return line.trim().split(/\s+/).slice(0, 2).join(' ');
+  const [type, b64] = line.trim().split(/\s+/);
+  return `${type === LEGACY_KEY_TYPE ? KEY_TYPE : type} ${b64}`;
 }
 
 // ---- the same Ed25519 key in OpenSSH formats (for logging in over SSH without a password) ----
@@ -48,13 +51,13 @@ const rawKeyParts = (privateKey) => {
 };
 
 /** "ssh-ed25519 AAAA... comment", for a server's ~/.ssh/authorized_keys. */
-export function sshPublicKeyLine(privateKey, comment = 'swiftssh') {
+export function sshPublicKeyLine(privateKey, comment = 'swiftstream') {
   const { pub } = rawKeyParts(privateKey);
   return `ssh-ed25519 ${Buffer.concat([sshString('ssh-ed25519'), sshString(pub)]).toString('base64')} ${comment}`;
 }
 
 /** The private key as an unencrypted "OPENSSH PRIVATE KEY" block (openssh-key-v1), which ssh2 can read. */
-export function sshPrivateKeyPem(privateKey, comment = 'swiftssh') {
+export function sshPrivateKeyPem(privateKey, comment = 'swiftstream') {
   const { seed, pub } = rawKeyParts(privateKey);
   const publicBlob = Buffer.concat([sshString('ssh-ed25519'), sshString(pub)]);
   const check = crypto.randomBytes(4);

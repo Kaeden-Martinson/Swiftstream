@@ -1,5 +1,5 @@
 // End-to-end test of first-time setup over SSH with a password: a tiny SSH server (ssh2) runs
-// real shell commands, and swiftssh must log in, upload itself, start, and connect.
+// real shell commands, and swiftstream must log in, upload itself, start, and connect.
 // Needs a POSIX `sh` on PATH (Linux, macOS, or Git Bash on Windows); skipped otherwise.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const cli = path.join(root, 'bin', 'swiftssh.js');
+const cli = path.join(root, 'bin', 'swiftstream.js');
 const work = path.join(root, '.test-home', 'bootstrap');
-const exe = path.join(root, 'dist', process.platform === 'win32' ? 'swiftssh.exe' : 'swiftssh');
+const exe = path.join(root, 'dist', process.platform === 'win32' ? 'swiftstream.exe' : 'swiftstream');
 
 if (spawnSync('sh', ['-c', 'exit 0']).status !== 0) {
   console.log('skip bootstrap tests: no POSIX sh on PATH');
@@ -61,7 +61,7 @@ function startSshServer(port, hostKey) {
       accept().on('exec', (acceptExec, _reject, info) => {
         const stream = acceptExec();
         const home = user.home.split(path.sep).join('/');
-        const env = { ...process.env, HOME: home, USERPROFILE: user.home, SWIFTSSH_HOME: path.join(user.home, '.swiftssh') };
+        const env = { ...process.env, HOME: home, USERPROFILE: user.home, SWIFTSTREAM_HOME: path.join(user.home, '.swiftstream') };
         delete env.SSH_AUTH_SOCK;
         const child = spawn('sh', ['-c', info.command], { env, cwd: user.home });
         stream.pipe(child.stdin);
@@ -87,7 +87,7 @@ const clientHome = path.join(work, 'client');
 // Async on purpose: the SSH server above runs in this same process, so a blocking spawnSync would freeze it.
 const run = (args, { input = '', home = clientHome, bin = [process.execPath, cli] } = {}) =>
   new Promise((resolve) => {
-    const child = spawn(bin[0], [...bin.slice(1), ...args], { env: { ...process.env, SWIFTSSH_HOME: home, SSH_AUTH_SOCK: '' } });
+    const child = spawn(bin[0], [...bin.slice(1), ...args], { env: { ...process.env, SWIFTSTREAM_HOME: home, SSH_AUTH_SOCK: '' } });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => (out += d));
@@ -101,11 +101,11 @@ const run = (args, { input = '', home = clientHome, bin = [process.execPath, cli
   });
 const ok = async (args, opts) => {
   const r = await run(args, opts);
-  assert.equal(r.code, 0, `swiftssh ${args.join(' ')} failed:\n${r.err}${r.out}`);
+  assert.equal(r.code, 0, `swiftstream ${args.join(' ')} failed:\n${r.err}${r.out}`);
   return r;
 };
 const stopRemote = (user) =>
-  spawnSync(process.execPath, [path.join(root, 'dist', 'swiftssh.cjs'), 'stop'], { env: { ...process.env, SWIFTSSH_HOME: path.join(user.home, '.swiftssh') } });
+  spawnSync(process.execPath, [path.join(root, 'dist', 'swiftstream.cjs'), 'stop'], { env: { ...process.env, SWIFTSTREAM_HOME: path.join(user.home, '.swiftstream') } });
 
 const swiftPort = await freePort();
 const target = `tester@127.0.0.1`;
@@ -116,11 +116,11 @@ try {
   assert.match(r.err, /was refused/);
   console.log('ok  wrong password refused');
 
-  // Right password: uploads the bundle, starts swiftssh, authorizes us, saves the host.
+  // Right password: uploads the bundle, starts swiftstream, authorizes us, saves the host.
   r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: 's3cret\n' });
-  assert.match(r.err, /Uploading SwiftSSH/);
+  assert.match(r.err, /Uploading Swiftstream/);
   assert.match(r.out, /box.*is ready/);
-  assert.ok(fs.existsSync(path.join(users.tester.home, '.swiftssh', 'bin', 'swiftssh.cjs')));
+  assert.ok(fs.existsSync(path.join(users.tester.home, '.swiftstream', 'bin', 'swiftstream.cjs')));
   console.log('ok  password login, upload, start, authorize');
 
   r = await ok(['exec', 'box', '--', 'echo', 'hello-from-bootstrap']);
@@ -133,9 +133,9 @@ try {
 
   // Setup authorized this computer's key for SSH, so a restart needs no password at all.
   const authorized = fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8');
-  assert.match(authorized, /^ssh-ed25519 \S+ swiftssh@/m);
+  assert.match(authorized, /^ssh-ed25519 \S+ swiftstream@/m);
   r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' });
-  assert.doesNotMatch(r.err, /Uploading SwiftSSH/);
+  assert.doesNotMatch(r.err, /Uploading Swiftstream/);
   assert.equal(fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8'), authorized); // not added twice
   console.log('ok  restart over SSH with no password, no re-upload');
 
@@ -155,7 +155,7 @@ try {
       input: 'hunter2\necho piped-after-password\nexit\n',
       bin: [exe],
     });
-    assert.ok(fs.existsSync(path.join(users.second.home, '.swiftssh', 'bin', 'swiftssh.cjs')));
+    assert.ok(fs.existsSync(path.join(users.second.home, '.swiftstream', 'bin', 'swiftstream.cjs')));
     assert.match(r.out, /piped-after-password/); // commands after the password reached the remote shell
     r = await ok(['exec', 'box2', '--', 'echo', 'hello-from-exe'], { bin: [exe] });
     assert.match(r.out, /hello-from-exe/);

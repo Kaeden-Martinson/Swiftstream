@@ -17,19 +17,16 @@ const state = {
   hosts: [], // [{ name, address, ssh, sshPort, group }]
   status: new Map(), // name -> 'checking' | 'up' | 'down'
   info: new Map(), // name -> server info from /v1/info
-  openTabs: [], // names of servers open as tabs
-  active: null, // open tab name, or null for the servers home
-  views: new Map(), // name -> { view, term, remote pane }
+  tabs: [], // session ids, in tab order
+  sessions: new Map(), // id -> { id, host, kind: 'terminal' | 'files', term, remote pane }
+  activeTab: null, // the session shown when page is 'session'
+  page: 'home', // 'home' | 'settings' | 'session'
   saved: {}, // persisted app state (see main.js "state:*")
 };
 
 const hostByName = (name) => state.hosts.find((h) => h.name === name) || null;
 
-/** Per-server UI state: which view is showing, its terminal, and its remote file pane. */
-function viewOf(name) {
-  if (!state.views.has(name)) state.views.set(name, { view: 'terminal', term: null, remote: newPane('remote', name) });
-  return state.views.get(name);
-}
+
 
 /** Persist part of the app state (debounced so rapid navigation doesn't write constantly). */
 let saveTimer;

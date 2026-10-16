@@ -1,4 +1,4 @@
-// End-to-end test: runs a real server and client on this machine with separate SWIFTSSH_HOME dirs.
+// End-to-end test: runs a real server and client on this machine with separate SWIFTSTREAM_HOME dirs.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const cli = path.join(root, 'bin', 'swiftssh.js');
+const cli = path.join(root, 'bin', 'swiftstream.js');
 const work = path.join(root, '.test-home');
 const serverHome = path.join(work, 'server');
 const clientHome = path.join(work, 'client');
@@ -19,12 +19,12 @@ fs.rmSync(work, { recursive: true, force: true });
 fs.mkdirSync(files, { recursive: true });
 
 const run = (home, ...args) => {
-  const r = spawnSync(process.execPath, [cli, ...args], { env: { ...process.env, SWIFTSSH_HOME: home }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [cli, ...args], { env: { ...process.env, SWIFTSTREAM_HOME: home }, encoding: 'utf8' });
   return { code: r.status, out: r.stdout, err: r.stderr };
 };
 const ok = (home, ...args) => {
   const r = run(home, ...args);
-  assert.equal(r.code, 0, `swiftssh ${args.join(' ')} failed:\n${r.err}${r.out}`);
+  assert.equal(r.code, 0, `swiftstream ${args.join(' ')} failed:\n${r.err}${r.out}`);
   return r.out;
 };
 const sha = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -41,7 +41,7 @@ const treeHashes = (dir) =>
   );
 
 const server = spawn(process.execPath, [cli, 'serve', '--port', port, '--host', '127.0.0.1', '--root', files], {
-  env: { ...process.env, SWIFTSSH_HOME: serverHome },
+  env: { ...process.env, SWIFTSTREAM_HOME: serverHome },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((resolve, reject) => {
@@ -55,8 +55,8 @@ try {
   ok(clientHome, 'add', 'local', `https://127.0.0.1:${port}`, '--yes');
   console.log('ok  keygen / authorize / add');
 
-  const exec = ok(clientHome, 'exec', 'local', '--', 'echo', 'hello-swiftssh');
-  assert.match(exec, /hello-swiftssh/);
+  const exec = ok(clientHome, 'exec', 'local', '--', 'echo', 'hello-swiftstream');
+  assert.match(exec, /hello-swiftstream/);
   console.log('ok  exec');
 
   const src = path.join(work, 'big.bin');
@@ -108,7 +108,7 @@ try {
   console.log('ok  pull folder, then re-pull is a no-op');
 
   // Paths inside a bundle must not escape the target folder.
-  process.env.SWIFTSSH_HOME = clientHome;
+  process.env.SWIFTSTREAM_HOME = clientHome;
   const { connectClient } = await import('../src/client.js');
   const { loadOrCreateIdentity } = await import('../src/keys.js');
   const { getHost } = await import('../src/config.js');

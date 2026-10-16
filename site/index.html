@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SwiftSSH: fast file transfer and shell for your servers</title>
-  <meta name="description" content="SwiftSSH uses SSH once to start itself on your server. After that, files move over HTTPS on eight connections at once, and anything unchanged is skipped.">
+  <title>Swiftstream: fast file transfer and shell for your servers</title>
+  <meta name="description" content="Swiftstream uses SSH once to start itself on your server. After that, files move over HTTPS on eight connections at once, and anything unchanged is skipped.">
   <meta name="theme-color" content="#0e1013">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="SwiftSSH">
+  <meta property="og:title" content="Swiftstream">
   <meta property="og:description" content="Keep your SSH login. Lose the slow transfers.">
   <meta property="og:image" content="og.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -43,7 +43,7 @@
 
   <header class="nav" id="nav">
     <div class="wrap nav-inner">
-      <a class="logo" href="#top" aria-label="SwiftSSH home"><svg class="logo-mark" aria-hidden="true"><use href="#i-prompt"/></svg>SwiftSSH</a>
+      <a class="logo" href="#top" aria-label="Swiftstream home"><svg class="logo-mark" aria-hidden="true"><use href="#i-prompt"/></svg>Swiftstream</a>
       <nav class="nav-links" id="nav-links" aria-label="Sections">
         <a href="#speed">Why it's faster</a>
         <a href="#how">How it works</a>
@@ -64,18 +64,18 @@
         <div class="hero-copy">
           <p class="eyebrow enter" style="--i:0">v0.1 · open source · MIT</p>
           <h1 class="enter" style="--i:1">Keep your SSH login. Lose the slow transfers.</h1>
-          <p class="lede enter" style="--i:2">SwiftSSH uses SSH once to start itself on your server. After that, files move over HTTPS on eight connections at once, and anything unchanged is skipped.</p>
+          <p class="lede enter" style="--i:2">Swiftstream uses SSH once to start itself on your server. After that, files move over HTTPS on eight connections at once, and anything unchanged is skipped.</p>
           <div class="cta-row enter" style="--i:3">
-            <a class="btn btn-primary" id="hero-download" href="downloads/SwiftSSH-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Download for Windows</span></a>
-            <button class="cmd" type="button" data-copy="swiftssh connect ubuntu@your-server" aria-label="Copy example command: swiftssh connect ubuntu@your-server">
-              <span>swiftssh connect ubuntu@your-server</span>
+            <a class="btn btn-primary" id="hero-download" href="downloads/Swiftstream-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-windows"/></svg><span>Download for Windows</span></a>
+            <button class="cmd" type="button" data-copy="swiftstream connect ubuntu@your-server" aria-label="Copy example command: swiftstream connect ubuntu@your-server">
+              <span>swiftstream connect ubuntu@your-server</span>
               <svg class="copy-icon" aria-hidden="true"><use href="#i-copy"/></svg>
             </button>
           </div>
-          <p class="fine enter" style="--i:4" id="hero-fine">Works with any Linux or macOS server you can SSH into. SwiftSSH installs itself there, and Node.js if it's missing.</p>
+          <p class="fine enter" style="--i:4" id="hero-fine">Works with any Linux or macOS server you can SSH into. Swiftstream installs itself there, and Node.js if it's missing.</p>
         </div>
 
-        <figure class="window hero-window enter" style="--i:2" id="hero-window" aria-label="The SwiftSSH desktop app uploading files to a server">
+        <figure class="window hero-window enter" style="--i:2" id="hero-window" aria-label="The Swiftstream desktop app uploading files to a server">
           <div class="window-bar">
             <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="window-title">prod · /var/www</span>
@@ -121,13 +121,13 @@
         <p class="eyebrow">01 · why it's faster</p>
         <h2 id="speed-title" class="narrow">A dropped packet shouldn't stall the whole transfer.</h2>
         <div class="speed-grid">
-          <figure class="lanes" id="lanes" aria-label="Diagram: with scp, a lost packet stops the one connection everything uses. With SwiftSSH, it stops one of eight connections while the other seven keep going.">
+          <figure class="lanes" id="lanes" aria-label="Diagram: with scp, a lost packet stops the one connection everything uses. With Swiftstream, it stops one of eight connections while the other seven keep going.">
             <div class="lane-head"><span>scp / sftp</span><span class="mono muted">1 connection</span></div>
             <div class="lane stall-lane" style="--done:38%;--rest:30%">
               <span class="seg"></span><svg class="x" aria-hidden="true"><use href="#i-x"/></svg><span class="seg wait"></span><span class="lane-note">everything waits</span>
             </div>
             <hr>
-            <div class="lane-head"><span>SwiftSSH</span><span class="mono muted">8 connections</span></div>
+            <div class="lane-head"><span>Swiftstream</span><span class="mono muted">8 connections</span></div>
             <div class="lane-stack">
               <div class="lane" style="--done:92%;--d:0"><span class="seg"></span></div>
               <div class="lane" style="--done:88%;--d:1"><span class="seg"></span></div>
@@ -143,7 +143,7 @@
           <div class="speed-notes">
             <div class="note">
               <h3>Thousands of small files, a few requests</h3>
-              <p>SFTP waits for a reply on every file it opens. SwiftSSH packs small files into bundles of up to 8 MB and sends several at once.</p>
+              <p>SFTP waits for a reply on every file it opens. Swiftstream packs small files into bundles of up to 8 MB and sends several at once.</p>
             </div>
             <div class="note">
               <h3>Unchanged files stay put</h3>
@@ -151,7 +151,7 @@
             </div>
             <div class="note mono-note">
               <p>Measure it on your own connection:</p>
-              <code>$ swiftssh bench prod</code>
+              <code>$ swiftstream bench prod</code>
             </div>
           </div>
         </div>
@@ -164,23 +164,23 @@
           <p class="eyebrow">02 · how it works</p>
           <h2 id="how-title">One SSH login, then you're done with it.</h2>
           <ol class="steps">
-            <li><h3>Log in the way you already do</h3><p>SwiftSSH runs your normal <code>ssh</code> once and starts itself on the server.</p></li>
+            <li><h3>Log in the way you already do</h3><p>Swiftstream runs your normal <code>ssh</code> once and starts itself on the server.</p></li>
             <li><h3>Your key is authorized, the server is pinned</h3><p>Its certificate arrives over that SSH session, so there's no "trust this host?" guesswork.</p></li>
             <li><h3>Connect from the app or the terminal</h3><p>Shells and transfers go over HTTPS from then on.</p></li>
           </ol>
         </div>
-        <figure class="window term" aria-label="Terminal session: deploying SwiftSSH to a server, then uploading a folder where only 3 of 615 files had changed">
+        <figure class="window term" aria-label="Terminal session: deploying Swiftstream to a server, then uploading a folder where only 3 of 615 files had changed">
           <div class="window-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="window-title mono">terminal</span></div>
           <div class="term-body" id="term-demo">
-            <div class="tl" data-type="cmd"><span class="p">$</span> <span class="typed">swiftssh deploy prod ubuntu@203.0.113.7</span></div>
+            <div class="tl" data-type="cmd"><span class="p">$</span> <span class="typed">swiftstream deploy prod ubuntu@203.0.113.7</span></div>
             <div class="tl"><svg class="ti c-info" aria-hidden="true"><use href="#i-chev"/></svg>Logging in to <b>ubuntu@203.0.113.7</b> with ssh…</div>
             <div class="tl"><svg class="ti c-ok" aria-hidden="true"><use href="#i-check"/></svg><b>prod</b> is ready: web-1 (linux) at 203.0.113.7:7022</div>
             <div class="tl gap"></div>
             <div class="tl muted">  Try it:</div>
-            <div class="tl">    swiftssh connect prod          <span class="dim">open a shell</span></div>
-            <div class="tl">    swiftssh push prod ./site ~/   <span class="dim">upload</span></div>
+            <div class="tl">    swiftstream connect prod          <span class="dim">open a shell</span></div>
+            <div class="tl">    swiftstream push prod ./site ~/   <span class="dim">upload</span></div>
             <div class="tl gap"></div>
-            <div class="tl" data-type="cmd"><span class="p">$</span> <span class="typed">swiftssh push prod ./site ~/</span></div>
+            <div class="tl" data-type="cmd"><span class="p">$</span> <span class="typed">swiftstream push prod ./site ~/</span></div>
             <div class="tl"><svg class="ti c-ok" aria-hidden="true"><use href="#i-check"/></svg>Uploaded /home/ubuntu/site: 3 sent (41 KB), 612 unchanged</div>
             <div class="tl"><span class="p">$</span> <span class="cursor" aria-hidden="true"></span></div>
           </div>
@@ -205,7 +205,7 @@
 
         <div class="window app-window">
           <div class="app-side" aria-hidden="true">
-            <div class="app-logo"><svg class="logo-mark"><use href="#i-prompt"/></svg>SwiftSSH</div>
+            <div class="app-logo"><svg class="logo-mark"><use href="#i-prompt"/></svg>Swiftstream</div>
             <div class="side-host on"><i class="dot up"></i><span>prod<small>203.0.113.7</small></span></div>
             <div class="side-host"><i class="dot up"></i><span>staging<small>10.0.4.12</small></span></div>
             <div class="side-host"><i class="dot down"></i><span>nas<small>192.168.1.20</small></span></div>
@@ -250,8 +250,8 @@
             <div class="panel add-panel" role="tabpanel" id="panel-add" aria-labelledby="tab-add" hidden>
               <div class="dialog">
                 <h3>Add a server</h3>
-                <div class="dlg-seg"><span class="on">I can log in with SSH</span><span>SwiftSSH is already running</span></div>
-                <p class="muted">SwiftSSH logs in with your SSH key once, starts itself on the server, and remembers it.</p>
+                <div class="dlg-seg"><span class="on">I can log in with SSH</span><span>Swiftstream is already running</span></div>
+                <p class="muted">Swiftstream logs in with your SSH key once, starts itself on the server, and remembers it.</p>
                 <label>SSH login<span class="fake-input">ubuntu@203.0.113.7</span></label>
                 <div class="dlg-row">
                   <label>Name<span class="fake-input">prod</span></label>
@@ -280,7 +280,7 @@
         </div>
         <div>
           <dl class="specs">
-            <div><dt>server identity</dt><dd>Each server has its own certificate. If its fingerprint ever changes, SwiftSSH refuses to connect.</dd></div>
+            <div><dt>server identity</dt><dd>Each server has its own certificate. If its fingerprint ever changes, Swiftstream refuses to connect.</dd></div>
             <div><dt>your key</dt><dd>Ed25519, generated on your computer. Servers only ever see the public half.</dd></div>
             <div><dt>transport</dt><dd>TLS from Node and OpenSSL. Every chunk and every file is checked with SHA-256.</dd></div>
             <div><dt>access</dt><dd>Only keys listed in the server's <code>authorized_keys</code> file can log in, and repeated failed logins are blocked for 10 minutes.</dd></div>
@@ -297,7 +297,7 @@
       <div class="wrap dl-grid">
         <div>
           <p class="eyebrow">05 · download</p>
-          <h2 id="download-title">Get SwiftSSH</h2>
+          <h2 id="download-title">Get Swiftstream</h2>
           <p class="body-muted">Pick the app or the command line. Either one sets a server up the first time you connect: it logs in over SSH, installs itself there (and Node.js if it's missing), and remembers the server.</p>
           <p class="dl-release muted" id="dl-release">Version 0.1.0 · <a href="downloads/SHA256SUMS.txt">SHA256SUMS.txt</a></p>
         </div>
@@ -310,25 +310,25 @@
                 <p><span data-dl-meta>64-bit installer</span></p>
                 <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
               </div>
-              <a class="btn btn-primary btn-small" data-dl-link href="downloads/SwiftSSH-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+              <a class="btn btn-primary btn-small" data-dl-link href="downloads/Swiftstream-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
             </li>
             <li data-kind="cli-exe">
               <svg aria-hidden="true"><use href="#i-terminal"/></svg>
               <div>
                 <h3>Command line for Windows</h3>
-                <p><span data-dl-meta>One file, nothing to install</span> · run <code>swiftssh.exe connect user@host</code></p>
+                <p><span data-dl-meta>One file, nothing to install</span> · run <code>swiftstream.exe connect user@host</code></p>
                 <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
               </div>
-              <a class="btn btn-small" data-dl-link href="downloads/swiftssh-0.1.0-win-x64.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+              <a class="btn btn-small" data-dl-link href="downloads/swiftstream-0.1.0-win-x64.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
             </li>
             <li data-kind="cli-portable">
               <svg aria-hidden="true"><use href="#i-linux"/></svg>
               <div>
                 <h3>Command line for macOS and Linux</h3>
-                <p><span data-dl-meta>Needs Node.js 18+</span> · run <code>node swiftssh.cjs connect user@host</code></p>
+                <p><span data-dl-meta>Needs Node.js 18+</span> · run <code>node swiftstream.cjs connect user@host</code></p>
                 <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
               </div>
-              <a class="btn btn-small" data-dl-link href="downloads/swiftssh-0.1.0.cjs" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+              <a class="btn btn-small" data-dl-link href="downloads/swiftstream-0.1.0.cjs" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
             </li>
             <li class="dl-later">
               <svg aria-hidden="true"><use href="#i-apple"/></svg>
@@ -344,7 +344,7 @@
 
   <footer class="footer">
     <div class="wrap footer-inner">
-      <span class="logo"><svg class="logo-mark" aria-hidden="true"><use href="#i-prompt"/></svg>SwiftSSH</span>
+      <span class="logo"><svg class="logo-mark" aria-hidden="true"><use href="#i-prompt"/></svg>Swiftstream</span>
       <span class="muted">MIT licensed</span>
       <a href="https://github.com/Kaeden-Martinson/SwiftSSH">GitHub</a>
       <a href="https://github.com/Kaeden-Martinson/SwiftSSH#readme">Docs</a>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
-  <title>SwiftSSH</title>
+  <title>Swiftstream</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -46,7 +46,7 @@
     <header class="tabbar">
       <button class="hometab" id="tab-home" type="button"><svg aria-hidden="true"><use href="#i-grid"/></svg>Servers</button>
       <div class="open-tabs" id="open-tabs" role="tablist" aria-label="Open servers"></div>
-      <button class="icon-btn tab-new" id="tab-new" type="button" title="Add a server" aria-label="Add a server"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
+      <button class="icon-btn tab-new" id="tab-new" type="button" title="New terminal or file browser (Ctrl+T)" aria-label="New tab"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
       <span class="tabbar-gap"></span>
       <button class="hometab settings-tab" id="tab-settings" type="button"><svg aria-hidden="true"><use href="#i-gear"/></svg>Settings</button>
     </header>
@@ -64,7 +64,7 @@
       <div class="groups" id="groups"></div>
       <div class="home-empty" id="home-empty" hidden>
         <h1>Connect your first server</h1>
-        <p>Type an SSH login above, like <code>ubuntu@203.0.113.7</code>, and press Connect. SwiftSSH logs in once with your password or SSH key, installs itself, and remembers the server.</p>
+        <p>Type an SSH login above, like <code>ubuntu@203.0.113.7</code>, and press Connect. Swiftstream logs in once with your password or SSH key, installs itself, and remembers the server.</p>
         <button class="btn btn-primary" id="empty-add" type="button">Add a server</button>
       </div>
       <p class="no-results muted" id="no-results" hidden></p>
@@ -72,17 +72,6 @@
 
     <!-- One server: terminal and files -->
     <section class="workspace" id="workspace" hidden>
-      <header class="ws-head">
-        <div class="ws-title">
-          <span class="dot" id="ws-dot"></span>
-          <div class="ws-titles"><h1 id="ws-name"></h1><div class="muted" id="ws-sub"></div></div>
-        </div>
-        <nav class="seg" role="tablist" aria-label="View">
-          <button type="button" role="tab" data-view="terminal"><svg aria-hidden="true"><use href="#i-terminal"/></svg>Terminal</button>
-          <button type="button" role="tab" data-view="files"><svg aria-hidden="true"><use href="#i-files"/></svg>Files</button>
-        </nav>
-        <button class="btn btn-quiet btn-small" id="ws-edit" type="button"><svg aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button>
-      </header>
 
       <div class="banner" id="banner" hidden>
         <div><div class="banner-message" id="banner-message"></div><div class="banner-hint" id="banner-hint"></div></div>
@@ -147,12 +136,15 @@
     <!-- Settings -->
     <section class="settings" id="settings" hidden>
       <div class="settings-inner">
-        <h1>Settings</h1>
+        <div class="settings-top">
+          <h1>Settings</h1>
+          <button class="icon-btn settings-close" id="settings-close" type="button" title="Close settings (Esc)" aria-label="Close settings"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+        </div>
 
         <section class="set-group">
           <h2>Server health</h2>
           <label class="set-row">
-            <span><b>Restart SwiftSSH automatically</b><small>If a server reboots or SwiftSSH stops, the app logs in over SSH with this computer's key and starts it again, then reconnects your terminal. Works for servers set up with an SSH login.</small></span>
+            <span><b>Restart Swiftstream automatically</b><small>If a server reboots or Swiftstream stops, the app logs in over SSH with this computer's key and starts it again, then reconnects your terminal. Works for servers set up with an SSH login.</small></span>
             <input type="checkbox" class="switch" id="set-autoheal">
           </label>
           <label class="set-row">
@@ -166,6 +158,10 @@
           <label class="set-row">
             <span><b>Show hidden files</b><small>Files and folders whose names start with a dot.</small></span>
             <input type="checkbox" class="switch" id="set-hidden">
+          </label>
+          <label class="set-row">
+            <span><b>Save opened files back to the server</b><small>When you open a server file (double-click, or Open with), saving it in your editor uploads it again.</small></span>
+            <input type="checkbox" class="switch" id="set-upload-save">
           </label>
           <label class="set-row">
             <span><b>Ask before moving files to the Recycle Bin</b><small>Deleting on a server always asks, because it can't be undone.</small></span>
@@ -205,10 +201,10 @@
       <h2>Add a server</h2>
       <div class="segmented" role="radiogroup">
         <label><input type="radio" name="mode" value="ssh" checked><span>I have an SSH login</span></label>
-        <label><input type="radio" name="mode" value="direct"><span>SwiftSSH is already running</span></label>
+        <label><input type="radio" name="mode" value="direct"><span>Swiftstream is already running</span></label>
       </div>
       <div data-mode="ssh">
-        <p class="muted">SwiftSSH logs in once, installs itself on the server (and Node.js if it's missing), and remembers it. Your password is used only for this login and is never saved.</p>
+        <p class="muted">Swiftstream logs in once, installs itself on the server (and Node.js if it's missing), and remembers it. Your password is used only for this login and is never saved.</p>
         <label class="field"><span>SSH login</span><input name="target" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
         <label class="field"><span>Password <small class="muted">leave empty to use your SSH key</small></span><input name="password" type="password" autocomplete="off"></label>
         <div class="field-row">
@@ -218,14 +214,14 @@
         </div>
       </div>
       <div data-mode="direct" hidden>
-        <p class="muted">Use this if you ran <code>swiftssh serve</code> on the server yourself.</p>
+        <p class="muted">Use this if you ran <code>swiftstream serve</code> on the server yourself.</p>
         <label class="field"><span>Address</span><input name="address" placeholder="192.168.1.20 or box.example.com:7022" autocomplete="off" spellcheck="false"></label>
         <label class="field"><span>Name</span><input name="directName" placeholder="home-server" autocomplete="off" spellcheck="false"></label>
       </div>
       <div class="trust" id="add-trust" hidden>
         <p>The server's fingerprint is:</p>
         <code class="fingerprint" id="add-fingerprint"></code>
-        <p class="muted">Check that it matches the fingerprint <code>swiftssh serve</code> printed on the server. If it doesn't, someone may be intercepting the connection.</p>
+        <p class="muted">Check that it matches the fingerprint <code>swiftstream serve</code> printed on the server. If it doesn't, someone may be intercepting the connection.</p>
       </div>
       <div class="trust" id="add-authorize" hidden>
         <p><b>One more step.</b> Allow this computer by running this on the server:</p>
@@ -248,12 +244,12 @@
         <label class="field"><span>Name</span><input name="name" autocomplete="off" spellcheck="false" required></label>
         <label class="field"><span>Group <small class="muted">optional</small></span><input name="group" list="group-options" placeholder="Production" autocomplete="off"></label>
       </div>
-      <label class="field"><span>SwiftSSH address</span><input name="address" autocomplete="off" spellcheck="false"></label>
+      <label class="field"><span>Swiftstream address</span><input name="address" autocomplete="off" spellcheck="false"></label>
       <div class="field-row">
-        <label class="field"><span>SSH login <small class="muted">used to restart SwiftSSH</small></span><input name="ssh" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>SSH login <small class="muted">used to restart Swiftstream</small></span><input name="ssh" placeholder="ubuntu@203.0.113.7" autocomplete="off" spellcheck="false"></label>
         <label class="field narrow"><span>SSH port</span><input name="sshPort" placeholder="22" inputmode="numeric"></label>
       </div>
-      <p class="muted small">The server's identity stays pinned, so a new address must point at the same SwiftSSH server.</p>
+      <p class="muted small">The server's identity stays pinned, so a new address must point at the same Swiftstream server.</p>
       <div class="form-error" id="edit-error" hidden></div>
       <div class="dialog-actions">
         <button type="button" class="btn btn-danger-quiet" id="edit-remove">Remove server</button>
@@ -284,7 +280,7 @@
   <dialog class="dialog" id="key-dialog">
     <form method="dialog" class="dialog-body">
       <h2>Your key</h2>
-      <p class="muted">This computer's public key. Servers allow you in by adding it with <code>swiftssh authorize</code>. SwiftSSH does this for you when you set a server up over SSH.</p>
+      <p class="muted">This computer's public key. Servers allow you in by adding it with <code>swiftstream authorize</code>. Swiftstream does this for you when you set a server up over SSH.</p>
       <div class="copy-box"><code id="key-text" class="wrap"></code><button type="button" class="btn btn-small" data-copy="key-text">Copy</button></div>
       <p class="muted small">Fingerprint <span id="key-fingerprint"></span></p>
       <div class="dialog-actions"><button class="btn btn-primary">Done</button></div>

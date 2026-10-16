@@ -79,13 +79,13 @@ const COMMANDS = {
     usage: 'setup',
     summary: 'Guided setup: connect this computer to a server',
     async run() {
-      console.log(`\n${c.bold('Welcome to swiftssh')} ${c.dim(`v${VERSION}`)}\n`);
+      console.log(`\n${c.bold('Welcome to swiftstream')} ${c.dim(`v${VERSION}`)}\n`);
       const identity = loadOrCreateIdentity();
       ok(`Your key is ready ${c.dim(keyFingerprint(identity.publicKeyString))}`);
       console.log(`
 How do you want to connect?
-  ${c.bold('1')}  I have an SSH login (username and password, or a key) ${c.dim('(recommended: swiftssh installs itself there)')}
-  ${c.bold('2')}  swiftssh is already running on the server
+  ${c.bold('1')}  I have an SSH login (username and password, or a key) ${c.dim('(recommended: swiftstream installs itself there)')}
+  ${c.bold('2')}  swiftstream is already running on the server
 `);
       const choice = await ask('Choose 1 or 2', '1');
       if (choice === '2') {
@@ -107,11 +107,11 @@ How do you want to connect?
   deploy: {
     group: 'Get started',
     usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022]',
-    summary: 'Set up swiftssh on a server you can log in to, and save it',
+    summary: 'Set up swiftstream on a server you can log in to, and save it',
     details: `Logs in over SSH once (your SSH key if you have one, otherwise your password),
-installs Node.js for your account if the server has none, uploads swiftssh, starts it in the
+installs Node.js for your account if the server has none, uploads swiftstream, starts it in the
 background, authorizes this computer's key, and pins the server's identity.
-"swiftssh connect user@host" does the same thing automatically the first time.`,
+"swiftstream connect user@host" does the same thing automatically the first time.`,
     async run([name, target], opts) {
       need(name && target, this.usage);
       await deployCommand(name, target, opts);
@@ -121,7 +121,7 @@ background, authorizes this computer's key, and pins the server's identity.
   add: {
     group: 'Get started',
     usage: 'add <name> <address>',
-    summary: 'Save a server where swiftssh is already running',
+    summary: 'Save a server where swiftstream is already running',
     async run([name, address], opts) {
       need(name && address, this.usage);
       validateHostName(name);
@@ -135,7 +135,7 @@ background, authorizes this computer's key, and pins the server's identity.
     summary: 'List your saved servers',
     async run() {
       const hosts = Object.entries(loadHosts());
-      if (!hosts.length) return info(`No servers yet. Run ${c.bold('swiftssh setup')} to add one.`);
+      if (!hosts.length) return info(`No servers yet. Run ${c.bold('swiftstream setup')} to add one.`);
       console.log(table([['NAME', 'ADDRESS', 'SSH LOGIN'], ...hosts.map(([n, h]) => [n, new URL(h.url).host, h.ssh || '-'])]));
     },
   },
@@ -158,7 +158,7 @@ background, authorizes this computer's key, and pins the server's identity.
     usage: 'connect <name | user@host> [--ssh-port 22] [--port 7022] [--name prod]',
     summary: 'Open a shell on a server (sets it up the first time)',
     details: `Give a saved server's name, or an SSH login like ubuntu@203.0.113.7. The first time you
-use a login, swiftssh signs in over SSH (asking for the password if your SSH key isn't accepted),
+use a login, swiftstream signs in over SSH (asking for the password if your SSH key isn't accepted),
 installs itself on the server, and saves it under --name (default: the host's short name).`,
     async run([target], opts) {
       need(target, this.usage);
@@ -262,7 +262,7 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
   serve: {
     group: 'On the server',
     usage: 'serve [--port 7022] [--host 0.0.0.0] [--root ~] [--daemon]',
-    summary: 'Run the swiftssh server on this machine',
+    summary: 'Run the swiftstream server on this machine',
     async run(_args, opts) {
       const port = Number(opts.port) || DEFAULT_PORT;
       if (opts.authorize) authorizeKey(opts.authorize);
@@ -272,12 +272,12 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
       const srv = await startServer({ port, host: opts.host, root: opts.root });
       writeJson(paths.pid, { pid: process.pid, port: srv.port });
       const addresses = lanAddresses();
-      ok(`swiftssh server running on port ${c.bold(srv.port)}`);
+      ok(`swiftstream server running on port ${c.bold(srv.port)}`);
       console.log(`  Fingerprint: ${srv.fingerprint}`);
       console.log(`\n  To connect from another computer, run there:`);
-      console.log(`    swiftssh add <name> ${addresses[0] || '<this-machine>'}:${srv.port}`);
+      console.log(`    swiftstream add <name> ${addresses[0] || '<this-machine>'}:${srv.port}`);
       console.log(`  then authorize that computer's key here:`);
-      console.log(`    swiftssh authorize "<key from 'swiftssh key'>"`);
+      console.log(`    swiftstream authorize "<key from 'swiftstream key'>"`);
       console.log(c.dim(`\n  Press Ctrl+C to stop.`));
       // runit and Ctrl+C both send a signal: finish open requests, close shells, then exit.
       let stopping = false;
@@ -305,7 +305,7 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
         const added = authorizeKey(key);
         ok(`${added ? 'Authorized' : 'Already authorized'}: ${keyFingerprint(key)}`);
       } catch {
-        throw new UserError("That isn't a swiftssh public key.", 'On your computer run "swiftssh key" and paste the whole line, in quotes.');
+        throw new UserError("That isn't a swiftstream public key.", 'On your computer run "swiftstream key" and paste the whole line, in quotes.');
       }
     },
   },
@@ -313,10 +313,10 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
   stop: {
     group: 'On the server',
     usage: 'stop',
-    summary: 'Stop a background swiftssh server',
+    summary: 'Stop a background swiftstream server',
     async run() {
       const pidInfo = readJson(paths.pid, null);
-      if (!pidInfo) return info('No swiftssh server is running.');
+      if (!pidInfo) return info('No swiftstream server is running.');
       try {
         process.kill(pidInfo.pid);
         ok(`Stopped the server (pid ${pidInfo.pid})`);
@@ -347,14 +347,14 @@ async function resolveOrSetUp(target, opts) {
   return name;
 }
 
-/** If a saved server isn't answering but we know its SSH login, offer to start swiftssh again. */
+/** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
 async function withServerRunning(name, opts, fn) {
   try {
     return await fn();
   } catch (err) {
     const host = loadHosts()[name];
     if (err.code !== 'ECONNREFUSED' || !host?.ssh || !process.stdin.isTTY) throw err;
-    warn(`SwiftSSH isn't running on ${name}.`);
+    warn(`Swiftstream isn't running on ${name}.`);
     if (!(await confirm(`Start it again by logging in to ${host.ssh}?`, true))) throw err;
     await deployCommand(name, host.ssh, { ...opts, 'ssh-port': opts['ssh-port'] || host.sshPort }, { quiet: true });
     return fn();
@@ -389,21 +389,21 @@ async function deployCommand(name, target, opts, { quiet = false } = {}) {
 async function addByAddress(name, address, yes) {
   const probe = await probeHost(address);
   console.log(`\n  The server's fingerprint is:\n  ${c.bold(probe.fingerprint)}\n`);
-  console.log(c.dim('  It should match the fingerprint "swiftssh serve" printed on the server.'));
+  console.log(c.dim('  It should match the fingerprint "swiftstream serve" printed on the server.'));
   if (!yes && !(await confirm('Does it match?'))) throw new UserError('Server not added.', 'If the fingerprints differ, someone may be intercepting the connection.');
   saveProbedHost(name, probe);
   const id = loadOrCreateIdentity();
   ok(`Saved ${c.bold(name)}`);
-  console.log(`\n  One more step: allow this computer on the server by running there:\n    swiftssh authorize "${id.publicKeyString}"`);
+  console.log(`\n  One more step: allow this computer on the server by running there:\n    swiftstream authorize "${id.publicKeyString}"`);
   nextSteps(name);
 }
 
 function nextSteps(name) {
   console.log(`
   Try it:
-    swiftssh connect ${name}                ${c.dim('open a shell')}
-    swiftssh push ${name} ./my-folder ~/    ${c.dim('upload')}
-    swiftssh pull ${name} ~/logs ./         ${c.dim('download')}
+    swiftstream connect ${name}                ${c.dim('open a shell')}
+    swiftstream push ${name} ./my-folder ~/    ${c.dim('upload')}
+    swiftstream pull ${name} ~/logs ./         ${c.dim('download')}
 `);
 }
 
@@ -414,7 +414,7 @@ function defaultName(address) {
 }
 
 function need(condition, usage) {
-  if (!condition) throw new UserError('Missing arguments.', `Usage: swiftssh ${usage}`);
+  if (!condition) throw new UserError('Missing arguments.', `Usage: swiftstream ${usage}`);
 }
 
 function lanAddresses() {
@@ -432,10 +432,10 @@ function printSync(verb, r) {
 function help(commandName) {
   const cmd = COMMANDS[commandName];
   if (cmd) {
-    console.log(`\n${c.bold(`swiftssh ${cmd.usage}`)}\n\n${cmd.summary}.${cmd.details ? `\n\n${cmd.details}` : ''}\n`);
+    console.log(`\n${c.bold(`swiftstream ${cmd.usage}`)}\n\n${cmd.summary}.${cmd.details ? `\n\n${cmd.details}` : ''}\n`);
     return;
   }
-  const lines = [`\n${c.bold('swiftssh')} ${c.dim(`v${VERSION}`)}  Fast remote shell and file transfer over HTTPS\n`];
+  const lines = [`\n${c.bold('swiftstream')} ${c.dim(`v${VERSION}`)}  Fast remote shell and file transfer over HTTPS\n`];
   const groups = {};
   for (const [name, cmdInfo] of Object.entries(COMMANDS)) (groups[cmdInfo.group] ||= []).push([name, cmdInfo]);
   for (const [group, cmds] of Object.entries(groups)) {
@@ -443,7 +443,7 @@ function help(commandName) {
     for (const [name, cmdInfo] of cmds) lines.push(`  ${name.padEnd(11)} ${cmdInfo.summary}`);
     lines.push('');
   }
-  lines.push(c.dim('Run "swiftssh <command> --help" for details on a command.\n'));
+  lines.push(c.dim('Run "swiftstream <command> --help" for details on a command.\n'));
   console.log(lines.join('\n'));
 }
 
@@ -485,7 +485,7 @@ async function main() {
     parsed = parseArgs({ options: OPTIONS, allowPositionals: true, strict: true });
   } catch (err) {
     const flag = /'(--?[\w-]+)'/.exec(err.message)?.[1];
-    throw new UserError(flag ? `Unknown option ${flag}.` : err.message, 'Run "swiftssh --help" to see the options.');
+    throw new UserError(flag ? `Unknown option ${flag}.` : err.message, 'Run "swiftstream --help" to see the options.');
   }
   const { values: opts, positionals } = parsed;
   if (opts.version) return console.log(VERSION);
@@ -493,7 +493,7 @@ async function main() {
   if (command === 'help') return help(args[0]);
   if (!command) {
     if (!Object.keys(loadHosts()).length) {
-      console.log(`\n${c.bold('Welcome to swiftssh!')} Run ${c.cyan('swiftssh setup')} to connect your first server.`);
+      console.log(`\n${c.bold('Welcome to swiftstream!')} Run ${c.cyan('swiftstream setup')} to connect your first server.`);
     }
     return help();
   }
@@ -501,7 +501,7 @@ async function main() {
   const cmd = COMMANDS[command];
   if (!cmd) {
     const guess = closest(command, [...Object.keys(COMMANDS), ...Object.keys(ALIASES)]);
-    throw new UserError(`"${command}" isn't a swiftssh command.`, guess ? `Did you mean "swiftssh ${ALIASES[guess] || guess}"?` : 'Run "swiftssh --help" to see all commands.');
+    throw new UserError(`"${command}" isn't a swiftstream command.`, guess ? `Did you mean "swiftstream ${ALIASES[guess] || guess}"?` : 'Run "swiftstream --help" to see all commands.');
   }
   if (opts.help) return help(command);
   return cmd.run.call(cmd, args, opts);
@@ -509,6 +509,6 @@ async function main() {
 
 main().catch((err) => {
   printError(explainError(err, errorContext));
-  if (process.env.SWIFTSSH_DEBUG) console.error(err);
+  if (process.env.SWIFTSTREAM_DEBUG) console.error(err);
   process.exitCode = 1;
 });

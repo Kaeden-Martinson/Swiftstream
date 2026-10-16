@@ -2,8 +2,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// SWIFTSSH_HOME lets one machine act as both client and server (handy for tests).
-export const HOME_DIR = process.env.SWIFTSSH_HOME || path.join(os.homedir(), '.swiftssh');
+// SWIFTSTREAM_HOME lets one machine act as both client and server (handy for tests).
+// SWIFTSSH_HOME is the same setting from before the rename.
+const HOME_OVERRIDE = process.env.SWIFTSTREAM_HOME || process.env.SWIFTSSH_HOME;
+export const HOME_DIR = HOME_OVERRIDE || path.join(os.homedir(), '.swiftstream');
+
+// The app was called SwiftSSH and kept its data in ~/.swiftssh. Copy it over once so keys, saved
+// servers, pinned certificates and settings carry across. The old folder is left alone (an older
+// copy of the app may still be running), apart from the old program and its pid file.
+export const LEGACY_DIR = path.join(os.homedir(), '.swiftssh');
+if (!HOME_OVERRIDE && !fs.existsSync(HOME_DIR) && fs.existsSync(LEGACY_DIR)) {
+  try {
+    fs.cpSync(LEGACY_DIR, HOME_DIR, { recursive: true, filter: (src) => !/[\\/](server\.pid|bin|uploads)$/.test(src) });
+  } catch {
+    /* start fresh rather than fail */
+  }
+}
 
 export const paths = {
   dir: HOME_DIR,
@@ -43,7 +57,7 @@ export function loadHosts() {
 
 export function getHost(name) {
   const host = loadHosts()[name];
-  if (!host) throw new Error(`Unknown host "${name}". Add it with "swiftssh add" or "swiftssh deploy".`);
+  if (!host) throw new Error(`Unknown host "${name}". Add it with "swiftstream add" or "swiftstream deploy".`);
   return host;
 }
 

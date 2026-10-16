@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { push, pushDir } from './transfer.js';
 import { formatBytes } from './util.js';
 
-const REMOTE_DIR = '.swiftssh-bench';
+const REMOTE_DIR = '.swiftstream-bench';
 
 function ssh(host, args, { cmd = 'ssh' } = {}) {
   const portFlag = cmd === 'scp' ? '-P' : '-p';
@@ -25,12 +25,12 @@ async function timed(fn) {
 }
 
 /**
- * Upload the same data with scp (SFTP protocol on OpenSSH 9+) and with swiftssh,
+ * Upload the same data with scp (SFTP protocol on OpenSSH 9+) and with swiftstream,
  * once as one big file and once as many small files, and compare wall-clock time.
  */
 export async function bench(client, host, { size, files, parallel, chunkSize }) {
-  if (!host.ssh) throw new Error('bench compares against scp, so the host needs an ssh target (hosts added with "swiftssh deploy" have one)');
-  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'swiftssh-bench-'));
+  if (!host.ssh) throw new Error('bench compares against scp, so the host needs an ssh target (hosts added with "swiftstream deploy" have one)');
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'swiftstream-bench-'));
   const quiet = { parallel, chunkSize, meter: { add() {}, finish() {}, stop() {} } };
   try {
     const big = path.join(local, 'big.bin');
@@ -64,7 +64,7 @@ export async function bench(client, host, { size, files, parallel, chunkSize }) 
 
 export function formatBench(rows) {
   const rate = (bytes, secs) => `${formatBytes(bytes / secs)}/s`;
-  const lines = [['test', 'scp/sftp', 'swiftssh', 'speedup']];
+  const lines = [['test', 'scp/sftp', 'swiftstream', 'speedup']];
   for (const r of rows) {
     lines.push([
       r.label,

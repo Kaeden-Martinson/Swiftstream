@@ -10,7 +10,7 @@ const DEFAULT_ACTIONS = [
 ];
 
 function settings() {
-  return { autoHeal: true, healthInterval: 30, confirmDelete: true, showHidden: true, actions: DEFAULT_ACTIONS, ...(state.saved.settings || {}) };
+  return { autoHeal: true, healthInterval: 30, confirmDelete: true, showHidden: true, uploadOnSave: true, actions: DEFAULT_ACTIONS, ...(state.saved.settings || {}) };
 }
 
 function updateSettings(patch) {
@@ -37,10 +37,8 @@ function fillCommand(template, ctx) {
 
 /** Switch to a server's terminal and type a command into it (queued until the session is ready). */
 function runInTerminal(name, command) {
-  openTab(name);
-  showView('terminal');
-  const v = viewOf(name);
-  ensureTerminal(name);
+  const v = openSession(name, 'terminal', { reuse: true });
+  if (!v) return;
   const send = () => {
     if (v.term?.id && !v.term.container.classList.contains('connecting')) {
       api.term.write(v.term.id, `${command}\r`);
@@ -72,6 +70,7 @@ function renderSettings() {
   $('set-interval').value = String(s.healthInterval);
   $('set-confirm-delete').checked = s.confirmDelete;
   $('set-hidden').checked = s.showHidden;
+  $('set-upload-save').checked = s.uploadOnSave;
   renderActionList();
   call(api.identity()).then((id) => ($('set-fingerprint').textContent = id.fingerprint)).catch(() => {});
 }
@@ -122,6 +121,7 @@ $('reset-actions').addEventListener('click', async () => {
 $('set-autoheal').addEventListener('change', (e) => updateSettings({ autoHeal: e.target.checked }));
 $('set-interval').addEventListener('change', (e) => updateSettings({ healthInterval: Number(e.target.value) }));
 $('set-confirm-delete').addEventListener('change', (e) => updateSettings({ confirmDelete: e.target.checked }));
+$('set-upload-save').addEventListener('change', (e) => updateSettings({ uploadOnSave: e.target.checked }));
 $('set-hidden').addEventListener('change', (e) => {
   updateSettings({ showHidden: e.target.checked });
   renderPane(localPane);
@@ -134,3 +134,13 @@ $('set-show-key').addEventListener('click', async () => {
   $('key-dialog').showModal();
 });
 $('tab-settings').addEventListener('click', () => activate(SETTINGS_PAGE));
+
+// Close settings: back to the tab (or the servers page) you came from.
+function closeSettings() {
+  const back = state.returnTo;
+  activate(back && state.sessions.has(back) ? back : null);
+}
+$('settings-close').addEventListener('click', closeSettings);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.page === 'settings' && !document.querySelector('dialog[open]')) closeSettings();
+});

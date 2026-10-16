@@ -1,8 +1,8 @@
 {
-  "name": "swiftssh-desktop",
-  "productName": "SwiftSSH",
+  "name": "swiftstream-desktop",
+  "productName": "Swiftstream",
   "version": "0.1.0",
-  "description": "Desktop app for swiftssh: fast remote shell and file transfer over HTTPS",
+  "description": "Desktop app for swiftstream: fast remote shell and file transfer over HTTPS",
   "type": "module",
   "main": "main.js",
   "private": true,
@@ -23,10 +23,10 @@
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3"
   },
-  "author": "SwiftSSH",
+  "author": "Swiftstream",
   "build": {
-    "appId": "dev.swiftssh.desktop",
-    "productName": "SwiftSSH",
+    "appId": "dev.swiftstream.desktop",
+    "productName": "Swiftstream",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -58,8 +58,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "SwiftSSH",
-      "artifactName": "SwiftSSH-Setup-${version}.exe"
+      "shortcutName": "Swiftstream",
+      "artifactName": "Swiftstream-Setup-${version}.exe"
     },
     "mac": {
       "target": "dmg",

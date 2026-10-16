@@ -13,10 +13,13 @@ let drag = null; // a drag that started on one of our rows: { side, host, items,
 const paneRoot = (side) => $(`${side}-pane`);
 const part = (side, name) => paneRoot(side).querySelector(`[data-part="${name}"]`);
 const action = (side, name) => paneRoot(side).querySelector(`[data-act="${name}"]`);
-const activeRemote = () => (state.active ? viewOf(state.active).remote : null);
+const activeRemote = () => {
+  const session = activeSession();
+  return session?.kind === 'files' ? session.remote : null;
+};
 const paneFor = (side) => (side === 'local' ? localPane : activeRemote());
-const filesShown = () => state.active && !$('files-pane').hidden;
-const isShown = (pane) => filesShown() && (pane.side === 'local' || pane.host === state.active);
+const filesShown = () => !!activeRemote();
+const isShown = (pane) => filesShown() && (pane.side === 'local' || pane === activeRemote());
 
 // ---------- navigation ----------
 
@@ -81,9 +84,10 @@ function goUp(pane) {
 
 const refreshPane = (pane) => pane?.cwd && navigate(pane, pane.cwd, { push: false });
 
-/** Called when the Files view is shown for a server: open its last folder (or home). */
-function openFilesFor(name) {
-  const remote = viewOf(name).remote;
+/** Called when a files tab is shown: open the server's last folder (or home). */
+function openFilesFor(session) {
+  const name = session.host;
+  const remote = session.remote;
   if (!localPane.listing && !localPane.loading) navigate(localPane, state.saved.localCwd || '');
   else renderPane(localPane);
   if (!remote.listing) {
@@ -255,8 +259,29 @@ function selectRow(pane, entry, e) {
 function openEntry(pane, entry) {
   if (entry.isDirectory) return navigate(pane, entryPath(pane, entry));
   if (pane.side === 'local') return call(api.files.localOpen(entry.path)).catch((err) => toast(err.message));
-  return downloadItems(pane.host, [entry], localPane.cwd, pane);
+  return openRemoteFile(pane.host, entryPath(pane, entry));
 }
+
+// ---------- open server files in local apps ----------
+
+let editorApps = [];
+call(api.edit.apps()).then((apps) => (editorApps = apps)).catch(() => {});
+
+/** Download a server file and open it (default app, a named editor, or the Windows chooser). Saves upload back. */
+async function openRemoteFile(host, remotePath, appId = 'default') {
+  toast(`Opening ${basenameOf(remotePath)}…`);
+  try {
+    await call(api.edit.open(host, remotePath, appId));
+  } catch (err) {
+    showBanner(err);
+  }
+}
+
+api.edit.onEvent(({ status, host, path, error }) => {
+  const name = basenameOf(path);
+  if (status === 'saved') toast(`Saved ${name} to ${host}`);
+  else if (status === 'error') toast(`Couldn't save ${name} to ${host}: ${error.message}`);
+});
 
 // ---------- rename, delete, new folder ----------
 
@@ -334,6 +359,12 @@ function rowMenu(pane, entry) {
   if (!many) {
     if (entry.isDirectory) items.push({ label: 'Open', icon: 'folder', hint: 'Enter', run: () => navigate(pane, path) });
     else if (pane.side === 'local') items.push({ label: 'Open', icon: 'file', hint: 'Enter', run: () => openEntry(pane, entry) });
+    else {
+      items.push({ label: 'Open', icon: 'file', hint: 'Enter', run: () => openRemoteFile(pane.host, path) });
+      for (const app of editorApps) items.push({ label: `Open with ${app.label}`, icon: 'external', run: () => openRemoteFile(pane.host, path, app.id) });
+      items.push({ label: 'Open with…', icon: 'external', run: () => openRemoteFile(pane.host, path, 'choose') });
+      items.push('separator');
+    }
   }
   if (pane.side === 'remote') {
     items.push({ label: many ? `Download ${selected.length} items` : 'Download', icon: 'arrow-left', disabled: !otherFolder || otherFolder === DRIVES, run: () => downloadItems(pane.host, selected, localPane.cwd, pane) });
@@ -407,7 +438,7 @@ async function downloadItems(host, entries, targetDir, fromPane) {
 
 /** transfers.js calls this when a job finishes, so the pane that changed shows the result. */
 function onTransferFinished(job) {
-  if (job.direction === 'up' && job.host === state.active) refreshPane(activeRemote());
+  if (job.direction === 'up' && activeRemote()?.host === job.host) refreshPane(activeRemote());
   if (job.direction === 'down') refreshPane(localPane);
 }
 
@@ -440,7 +471,7 @@ function startDrag(pane, entry, e) {
   }
   drag = { side: pane.side, host: pane.host, items: selectedEntries(pane).map((x) => ({ ...x, path: entryPath(pane, x) })), fromDir: pane.cwd };
   e.dataTransfer.effectAllowed = 'copy';
-  e.dataTransfer.setData('application/x-swiftssh', pane.side);
+  e.dataTransfer.setData('application/x-swiftstream', pane.side);
   const label = el('div', { className: 'drag-ghost', textContent: drag.items.length === 1 ? drag.items[0].name : `${drag.items.length} items` });
   document.body.append(label);
   e.dataTransfer.setDragImage(label, 12, 12);
@@ -468,11 +499,9 @@ function clearDropUI() {
   }
 }
 
-function showDropTarget(side, row) {
+function showDropTarget(side) {
   const pane = paneFor(side);
-  for (const r of paneRoot(side).querySelectorAll('tr.drop-into')) if (r !== row) r.classList.remove('drop-into');
-  row?.classList.add('drop-into');
-  const target = row?.dataset.path || pane.cwd;
+  const target = pane.cwd;
   const label = part(side, 'drop');
   label.replaceChildren(icon(side === 'remote' ? 'up' : 'down'), el('span', {}, side === 'remote' ? 'Upload to ' : 'Download to ', el('b', { textContent: target })));
   label.hidden = false;
@@ -485,7 +514,7 @@ for (const side of ['local', 'remote']) {
     if (!canDrop(side, e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    showDropTarget(side, e.target.closest('tr[data-dir]'));
+    showDropTarget(side);
   });
   list.addEventListener('dragleave', (e) => {
     if (!list.contains(e.relatedTarget)) clearDropUI();
@@ -494,8 +523,7 @@ for (const side of ['local', 'remote']) {
     if (!canDrop(side, e)) return;
     e.preventDefault();
     const pane = paneFor(side);
-    const row = e.target.closest('tr[data-dir]');
-    const targetDir = row?.dataset.path || pane.cwd;
+    const targetDir = pane.cwd;
     const from = drag;
     clearDropUI();
     lastPaneSide = side;

@@ -10,13 +10,15 @@ import { sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
 import { loadServerBundle } from './self.js';
 
 const { Client, utils } = ssh2;
-const READY_PREFIX = 'SWIFTSSH_READY ';
-const REMOTE_BUNDLE = '$HOME/.swiftssh/bin/swiftssh.cjs';
+const READY_PREFIX = 'SWIFTSTREAM_READY ';
+const LEGACY_READY_PREFIX = 'SWIFTSSH_READY '; // printed by servers from before the rename
+const LEGACY_BUNDLE = '$HOME/.swiftssh/bin/swiftssh.cjs';
+const REMOTE_BUNDLE = '$HOME/.swiftstream/bin/swiftstream.cjs';
 const KNOWN_HOSTS = path.join(paths.dir, 'ssh_known_hosts.json');
 
 /**
  * Log in to a server over SSH once (key or password), make sure Node.js is there, upload
- * swiftssh, start it in the background, authorize this computer's key, and return the
+ * swiftstream, start it in the background, authorize this computer's key, and return the
  * server's certificate. The certificate arrives over the authenticated SSH session, so the
  * client can pin it without a trust-on-first-use prompt.
  *
@@ -38,7 +40,7 @@ export async function deployOverSsh({
   onStep = () => {},
   bundlePath,
 }) {
-  if (!/^swiftssh-ed25519 [A-Za-z0-9+/=]+$/.test(publicKey)) throw new Error('Invalid public key');
+  if (!/^swift(stream|ssh)-ed25519 [A-Za-z0-9+/=]+$/.test(publicKey)) throw new Error('Invalid public key');
   const { username, host } = parseTarget(target);
   const bundle = loadServerBundle(bundlePath);
   const bundleSha = crypto.createHash('sha256').update(bundle).digest('hex');
@@ -53,30 +55,37 @@ export async function deployOverSsh({
     let node = facts.node;
     if (!node) node = await installNode(session, facts, onStep, session.loginPassword);
 
+    // A server set up before the rename runs the old program on the same port: stop it first.
+    if (facts.legacy) {
+      onStep('Upgrading from SwiftSSH');
+      await run(session, sh(`"${node}" "${LEGACY_BUNDLE}" stop`)).catch(() => {});
+      await run(session, sh(`rm -f "${LEGACY_BUNDLE}"`)).catch(() => {});
+    }
+
     if (facts.bundle_sha !== bundleSha) {
-      onStep('Uploading SwiftSSH');
+      onStep('Uploading Swiftstream');
       // A different version may be running from an older upload: stop it so the new one starts.
       if (facts.bundle_sha) await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
       const up = await run(
         session,
-        sh(`umask 077 && mkdir -p "$HOME/.swiftssh/bin" && cat > "${REMOTE_BUNDLE}.tmp" && mv "${REMOTE_BUNDLE}.tmp" "${REMOTE_BUNDLE}"`),
+        sh(`umask 077 && mkdir -p "$HOME/.swiftstream/bin" && cat > "${REMOTE_BUNDLE}.tmp" && mv "${REMOTE_BUNDLE}.tmp" "${REMOTE_BUNDLE}"`),
         { stdin: bundle },
       );
-      if (up.code !== 0) throw new UserError(`Uploading SwiftSSH to ${host} failed.`, up.stderr.trim());
+      if (up.code !== 0) throw new UserError(`Uploading Swiftstream to ${host} failed.`, up.stderr.trim());
     }
 
-    onStep('Starting SwiftSSH');
+    onStep('Starting Swiftstream');
     const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey}"`));
-    const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX));
+    const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
     if (!line) {
-      throw new UserError(`SwiftSSH didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftssh/server.log on the server.');
+      throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');
     }
     const ready = { ...parseReadyLine(line), host };
 
     if (identityKey && authorizeSsh) {
-      // Let this computer log in over SSH with its SwiftSSH key, so a stopped server can be
+      // Let this computer log in over SSH with its Swiftstream key, so a stopped server can be
       // restarted automatically without asking for a password. Same access the key already has.
-      const comment = `swiftssh@${os.hostname().replace(/[^w.-]/g, '') || 'computer'}`;
+      const comment = `swiftstream@${os.hostname().replace(/[^w.-]/g, '') || 'computer'}`;
       const line = sshPublicKeyLine(identityKey, comment);
       const keyData = line.split(' ')[1];
       await run(session, sh(`umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && (grep -qF "${keyData}" "$HOME/.ssh/authorized_keys" || printf '%s\n' "${line}" >> "$HOME/.ssh/authorized_keys")`)).catch(() => {});
@@ -86,7 +95,7 @@ export async function deployOverSsh({
     const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} >/dev/null 2>&1`;
     const cron = await run(
       session,
-      sh(`command -v crontab >/dev/null 2>&1 || exit 3; (crontab -l 2>/dev/null | grep -v "swiftssh.cjs\" serve"; echo '${cronLine.replace(/'/g, `'"'"'`)}') | crontab -`),
+      sh(`command -v crontab >/dev/null 2>&1 || exit 3; (crontab -l 2>/dev/null | grep -v -e "swiftstream.cjs\" serve" -e "swiftssh.cjs\" serve"; echo '${cronLine.replace(/'/g, `'"'"'`)}') | crontab -`),
     ).catch(() => ({ code: 1 }));
     ready.autostart = cron.code === 0;
     return ready;
@@ -256,14 +265,15 @@ function run(conn, command, { stdin } = {}) {
 // ---- server facts and Node.js -------------------------------------------------
 
 const PROBE = `
-D="$HOME/.swiftssh"
+D="$HOME/.swiftstream"
 node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 18 ] 2>/dev/null; }
 N=""
-for c in "$D/runtime/bin/node" "$(command -v node 2>/dev/null)" /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node; do
+for c in "$D/runtime/bin/node" "$HOME/.swiftssh/runtime/bin/node" "$(command -v node 2>/dev/null)" /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node; do
   if node_ok "$c"; then N="$c"; break; fi
 done
 if [ -z "$N" ] && [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; c=$(command -v node 2>/dev/null); node_ok "$c" && N="$c"; fi
 echo "node=$N"
+[ -f "$HOME/.swiftssh/bin/swiftssh.cjs" ] && echo "legacy=1"
 echo "os=$(uname -s)"
 echo "arch=$(uname -m)"
 if ls /lib/ld-musl-* >/dev/null 2>&1; then echo "libc=musl"; else echo "libc=glibc"; fi
@@ -271,7 +281,7 @@ for pm in xbps-install apt-get dnf yum apk pacman zypper brew; do command -v $pm
 echo "uid=$(id -u)"
 command -v sudo >/dev/null 2>&1 && echo "sudo=1"
 if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; fi
-if [ -f "$D/bin/swiftssh.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftssh.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftssh.cjs") | cut -d' ' -f1)"; fi
+if [ -f "$D/bin/swiftstream.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftstream.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftstream.cjs") | cut -d' ' -f1)"; fi
 `;
 
 async function probe(conn) {
@@ -284,10 +294,10 @@ async function probe(conn) {
   return facts;
 }
 
-// Official Node.js builds are glibc-only; they need no root because they unpack into ~/.swiftssh/runtime.
+// Official Node.js builds are glibc-only; they need no root because they unpack into ~/.swiftstream/runtime.
 const NODE_DOWNLOAD = `
 set -e
-D="$HOME/.swiftssh"; mkdir -p "$D"
+D="$HOME/.swiftstream"; mkdir -p "$D"
 case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) echo "unsupported system $(uname -s)" >&2; exit 3 ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported CPU $(uname -m)" >&2; exit 3 ;; esac
 base=https://nodejs.org/dist/latest-v22.x
@@ -342,7 +352,7 @@ async function installNode(conn, facts, onStep, sudoPassword) {
 
   const manual = installCmd ? `sudo ${installCmd}` : 'install Node.js 18 or newer with your package manager';
   throw new UserError(
-    `Node.js 18 or newer isn't installed on the server, and SwiftSSH couldn't install it automatically.`,
+    `Node.js 18 or newer isn't installed on the server, and Swiftstream couldn't install it automatically.`,
     `On the server run:\n  ${manual}\nthen connect again.`,
   );
 }
@@ -353,5 +363,6 @@ export function readyLine({ port, fingerprint, cert }) {
 }
 
 export function parseReadyLine(line) {
-  return JSON.parse(Buffer.from(line.slice(READY_PREFIX.length), 'base64').toString());
+  const prefix = line.startsWith(LEGACY_READY_PREFIX) ? LEGACY_READY_PREFIX : READY_PREFIX;
+  return JSON.parse(Buffer.from(line.slice(prefix.length), 'base64').toString());
 }

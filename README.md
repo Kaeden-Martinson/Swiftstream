@@ -9,20 +9,26 @@ There are two ways to use it: the **desktop app** (terminal and file browser) or
 
 ## Desktop app
 
-Download `Swiftstream-Setup-<version>.exe` and run it. Type an SSH login like `ubuntu@203.0.113.7` in the search bar and press **Connect**. The app logs in once, installs Swiftstream on the server and opens it in a tab.
+Download `Swiftstream-Setup-<version>.exe` and run it. Type an SSH login like `ubuntu@203.0.113.7` in the search bar and press **Connect**. The app logs in once, installs Swiftstream on the server and opens it in a tab. The installer also puts the `swiftstream` command on your PATH (no Node.js needed), and `swiftstream app` opens the app from any terminal.
 
-- **Servers home:** your servers as cards, in groups you choose, with a live status dot on each. Search by name, address, login or group. Right-click a card for terminal, files, edit, restart and remove, plus any actions you've added.
+- **Servers home:** your servers as cards, in groups you choose, with a live status dot on each. Search by name, address, login or group. Hosts in your `~/.ssh/config` that aren't set up yet appear under **From your SSH config**, one click from set up. Right-click a card for terminal, files, edit, restart, **Authorized computers** and remove, plus any actions you've added.
 - **Tabs:** each tab is a terminal or a file browser for one server, and a server can have several of each. The **+** button (Ctrl+T) opens a new one for any server. Ctrl+Tab moves between tabs and Ctrl+W closes one. The app reopens the tabs you had open last time.
-- **Terminal:** a full terminal on the server. Copy with Ctrl+Shift+C.
+- **Terminal:** a full terminal on the server, in color.
+  - Split a tab into side-by-side terminals with Ctrl+Shift+D (Ctrl+Shift+W closes one).
+  - Find with Ctrl+Shift+F; change the text size with Ctrl+= and Ctrl+−.
+  - Copy with Ctrl+Shift+C, or turn on copy-on-select in Settings. Right-click for copy, paste, find, split and clear.
 - **Files:** your computer on the left, the server on the right.
   - Drag between the two panes, or drag in from Explorer, to transfer. Files go to the folder that's open in the pane you drop on.
+  - Select several files by dragging a box across them. Dragging a file toward the other pane moves the selection there.
+  - Transfers can be paused, resumed and canceled, and show their speed and time left. The **Transfers** button on the tab bar lists recent ones, with Retry for any that failed.
   - Double-click a server file to open it in its usual app. Right-click for **Open with** VS Code, Notepad and others. Saving it uploads it back to the server.
   - Each pane has back, forward and up buttons; your mouse's back and forward buttons work too, as do Alt+Left and Alt+Right.
   - Filter a folder with Ctrl+F. Click the path bar (or press Ctrl+L) to type or paste a path.
   - Right-click for open, transfer, rename (F2), delete (Del), new folder and copy path. Deleting on your computer goes to the Recycle Bin; deleting on a server asks first.
   - The app remembers where you uploaded files from each folder on your computer. Next time, it offers that spot, and shows a **Go there** link when you open the same folder on the left.
 - **Auto-healing:** the app checks your servers every 30 seconds. If Swiftstream stops or the server reboots, it logs back in over SSH with this computer's key, which setup added to the server's `~/.ssh/authorized_keys`. It then restarts Swiftstream and reconnects your terminal, without needing a password. Where the server has `crontab`, setup also adds an `@reboot` entry so Swiftstream starts on boot.
-- **Settings:** turn auto-healing on or off, change how often servers are checked, show or hide dotfiles, and edit your right-click actions. Actions are commands like `df -h` or `tail -f {path}` that run in the server's terminal.
+- **Staying current:** the app updates itself in the background (**Restart to update** appears on the tab bar), and updates any server running an older Swiftstream, once that server's terminals are closed.
+- **Settings:** light, dark or system theme; terminal text size and copy-on-select; auto-healing and how often servers are checked; dotfiles; your right-click actions (commands like `df -h` or `tail -f {path}` that run in the server's terminal); and **Help**, with **Copy diagnostics** for bug reports.
 
 Log in with a password or your SSH key. The password is used only for that one login, plus `sudo` if Node.js has to be installed, and is never saved. From then on the app uses its own key.
 
@@ -44,9 +50,13 @@ swiftstream push prod ./site /var/www/      # folders: only changed files are se
 swiftstream bench prod                      # measure scp/sftp vs swiftstream on this host
 swiftstream exec prod -- systemctl restart app
 swiftstream hosts                           # list saved servers;  swiftstream remove <name> to forget one
+swiftstream connect myalias                 # an alias from ~/.ssh/config works like it does for ssh
+swiftstream import                          # set up hosts from ~/.ssh/config, or pick some
+swiftstream computers prod                  # who can log in;  swiftstream revoke prod <computer>
+swiftstream app                             # open the desktop app
 ```
 
-Run `swiftstream` on its own for the list of commands, and `swiftstream <command> --help` for details on one. Errors explain the fix, for example the exact `swiftstream authorize` line to run when a server doesn't know your key yet. Typos get a "did you mean" suggestion.
+Run `swiftstream` on its own for the list of commands, and `swiftstream <command> --help` for details on one. Ctrl+C during a transfer stops it; running the same command again continues where it left off. Something not working? See [Troubleshooting and FAQ](docs/TROUBLESHOOTING.md). Errors explain the fix, for example the exact `swiftstream authorize` line to run when a server doesn't know your key yet. Typos get a "did you mean" suggestion.
 
 ## Why HTTPS instead of SCP/SFTP
 
@@ -232,10 +242,9 @@ node bin/swiftstream.js add local 127.0.0.1:7022
 
 ## Roadmap
 
-1. **Publish to npm and GitHub Releases**: `swiftstream.exe` and the app installer, signed.
+1. **Signed builds** for Windows, and desktop builds for macOS and Linux.
 2. **Delta transfer** for large files that changed slightly (rsync-style rolling checksums), and an optional `--delete` for folder sync.
 3. **HTTP/3 / QUIC transport** for lossy links, keeping HTTPS/1.1 as the fallback.
 4. **Accounts** (Termius-style): a hosted account that syncs your host list and public keys between devices. The private key stays on each device.
-5. **Desktop app polish**: multiple terminal tabs per server, delete/rename in the file browser, auto-update, and signed builds for Windows and macOS.
-6. **Hardening**: rate-limit auth, per-key permissions such as a root dir or read-only access, audit log, and systemd/launchd service install.
-7. **Port forwarding** over the same WebSocket channel.
+5. **Hardening**: per-key permissions such as a root dir or read-only access, an audit log, and systemd/launchd service install.
+6. **Port forwarding** over the same WebSocket channel.

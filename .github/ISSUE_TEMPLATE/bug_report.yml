@@ -1,0 +1,42 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Have a quick look at [Troubleshooting](https://github.com/Kaeden-Martinson/Swiftstream/blob/main/docs/TROUBLESHOOTING.md) first, in case it's covered there.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead. Error messages and screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      placeholder: |
+        1. Right-click a server, Browse files
+        2. Drag a folder to the server pane
+        3. …
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where?
+      options:
+        - Desktop app
+        - Command line (swiftstream / sws)
+        - Website
+        - The server side
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In the app: Settings › Help › Copy diagnostics, then paste here. From the command line: the output of `swiftstream --version`, your OS, and the server's OS.
+        It has your servers' addresses but no passwords or keys; remove anything you'd rather not share.
+      render: text

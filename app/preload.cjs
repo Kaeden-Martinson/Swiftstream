@@ -57,4 +57,5 @@ contextBridge.exposeInMainWorld('swift', {
   onNav: on('nav'),
   edit: { open: (name, remotePath, appId) => call('edit:open', name, remotePath, appId), apps: () => call('edit:apps'), onEvent: on('edit') },
   health: { check: (name) => call('health:check', name), heal: (name) => call('health:heal', name), onEvent: on('health') },
+  updates: { state: () => call('update:state'), check: () => call('update:check'), install: () => call('update:install'), onState: on('update') },
 });

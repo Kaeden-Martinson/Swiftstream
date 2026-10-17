@@ -6,6 +6,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import updater from 'electron-updater';
 import { connectClient } from './core/client.js';
 import { loadHosts, paths, readJson, writeJson } from './core/config.js';
 import { explainError } from './core/errors.js';
@@ -430,7 +431,7 @@ app.on('will-quit', () => {
 
 // ---- health: notice a stopped Swiftstream and restart it over SSH ---------------
 
-const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30 };
+const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30, autoUpdate: true };
 const settings = () => ({ ...DEFAULT_SETTINGS, ...(loadState().settings || {}) });
 const healing = new Map(); // name -> { busy, last }
 const HEAL_COOLDOWN_MS = 120_000;
@@ -582,6 +583,46 @@ function createWindow() {
   }
 }
 
+// ---- updates: download new versions from GitHub Releases in the background --------
+
+const { autoUpdater } = updater;
+const UPDATE_CHECK_MS = 6 * 60 * 60 * 1000;
+let updateState = { state: app.isPackaged ? 'idle' : 'dev', current: app.getVersion(), version: null, percent: 0, error: null };
+const setUpdateState = (patch) => {
+  updateState = { ...updateState, ...patch };
+  send('update', updateState);
+};
+
+function checkForUpdates({ quiet = true } = {}) {
+  if (!app.isPackaged) return setUpdateState({ state: 'dev' });
+  if (['checking', 'downloading', 'ready'].includes(updateState.state)) return;
+  autoUpdater.checkForUpdates().catch((err) => {
+    // Offline or GitHub unreachable: say so only when the user asked.
+    setUpdateState({ state: quiet ? 'idle' : 'error', error: quiet ? null : err.message });
+  });
+}
+
+function setUpUpdates() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true; // a downloaded update also installs when you quit
+  autoUpdater.on('checking-for-update', () => setUpdateState({ state: 'checking', error: null }));
+  autoUpdater.on('update-available', (info) => setUpdateState({ state: 'downloading', version: info.version, percent: 0 }));
+  autoUpdater.on('update-not-available', () => setUpdateState({ state: 'current' }));
+  autoUpdater.on('download-progress', (p) => setUpdateState({ state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (info) => setUpdateState({ state: 'ready', version: info.version }));
+  autoUpdater.on('error', (err) => setUpdateState({ state: updateState.state === 'checking' ? 'idle' : 'error', error: err.message }));
+  const auto = () => settings().autoUpdate !== false && checkForUpdates();
+  setTimeout(auto, 10_000);
+  setInterval(auto, UPDATE_CHECK_MS).unref();
+}
+
+handle('update:state', () => updateState);
+handle('update:check', () => checkForUpdates({ quiet: false }));
+handle('update:install', () => {
+  if (updateState.state === 'ready') setImmediate(() => autoUpdater.quitAndInstall(true, true)); // silent, then relaunch
+});
+
 // One app at a time: opening it again (Start menu, taskbar, "swiftstream app") brings the window back.
 // Screenshot runs during development are exempt so they can run beside your open app.
 const isShot = !app.isPackaged && !!process.env.SWIFTSTREAM_SHOT;
@@ -598,6 +639,7 @@ app.whenReady().then(() => {
   if (!firstInstance) return;
   applyTheme();
   createWindow();
+  setUpUpdates();
   scheduleHealth();
 });
 app.on('window-all-closed', () => {

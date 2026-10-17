@@ -425,3 +425,9 @@ option { background: var(--panel); color: var(--text); }
 
 /* Box selection in the file lists */
 .select-box { position: absolute; z-index: 2; pointer-events: none; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 3px; }
+
+/* Tab bar: shown once an update has downloaded */
+.update-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; margin-right: 4px; border-radius: 999px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; flex: none; transition: background-color .15s; }
+.update-btn:hover { background: var(--accent-drop); }
+.update-btn svg { width: 15px; height: 15px; }
+.update-btn[hidden] { display: none; }

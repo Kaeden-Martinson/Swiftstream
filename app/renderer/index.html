@@ -10,6 +10,7 @@
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-arrow-up-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 16V8.5M8.5 11.5L12 8l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-prompt" viewBox="0 0 24 24"><path d="M4.5 6.5L10 12l-5.5 5.5M12.5 17.5h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
@@ -49,6 +50,7 @@
       <div class="open-tabs" id="open-tabs" role="tablist" aria-label="Open servers"></div>
       <button class="icon-btn tab-new" id="tab-new" type="button" title="New terminal or file browser (Ctrl+T)" aria-label="New tab"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
       <span class="tabbar-gap"></span>
+      <button class="update-btn" id="update-btn" type="button" hidden title="A new version is downloaded. Restart Swiftstream to install it."><svg aria-hidden="true"><use href="#i-arrow-up-circle"/></svg><span>Restart to update</span></button>
       <button class="hometab settings-tab" id="tab-settings" type="button"><svg aria-hidden="true"><use href="#i-gear"/></svg>Settings</button>
     </header>
 
@@ -200,6 +202,18 @@
         </section>
 
         <section class="set-group">
+          <h2>Updates</h2>
+          <label class="set-row">
+            <span><b>Update automatically</b><small>New versions download in the background. Restart when it suits you, or they install the next time you quit.</small></span>
+            <input type="checkbox" class="switch" id="set-autoupdate">
+          </label>
+          <div class="set-row">
+            <span><b>Swiftstream <span id="update-current"></span></b><small id="update-status">Checking for updates…</small></span>
+            <button class="btn btn-small" id="update-action" type="button">Check now</button>
+          </div>
+        </section>
+
+        <section class="set-group">
           <h2>This computer</h2>
           <div class="set-row">
             <span><b>Your key</b><small>Fingerprint <span id="set-fingerprint" class="mono"></span></small></span>
@@ -326,6 +340,7 @@
   <script src="js/terminal.js"></script>
   <script src="js/files.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/updates.js"></script>
   <script src="js/home.js"></script>
   <script src="js/workspace.js"></script>
   <script src="js/health.js"></script>

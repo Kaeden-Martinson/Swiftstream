@@ -8,6 +8,7 @@ What changed in each version. The release workflow copies a version's section in
 - `swiftstream app` opens the desktop app, or brings it to the front if it's already open.
 - A pinned taskbar button keeps the Swiftstream name and logo.
 - The installer always makes sure the desktop shortcut is there, updates included.
+- The desktop app updates itself: new versions download in the background, then "Restart to update".
 
 ## [0.1.1] - 2026-10-16
 

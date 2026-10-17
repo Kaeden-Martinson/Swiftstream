@@ -35,7 +35,7 @@ jobs:
       - run: npm run test:package
 
   app:
-    name: Desktop app builds
+    name: Desktop app build and app tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,3 +51,12 @@ jobs:
       - run: node --check app/main.js
       - name: Build the installer (unsigned, not published)
         run: npm run release
+      - name: App tests (the real app against throwaway servers)
+        run: npm run test:app
+      - name: Screenshots from the app tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-screenshots
+          path: .test-home/app/*/shots/
+          if-no-files-found: ignore

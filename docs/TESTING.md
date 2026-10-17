@@ -19,8 +19,13 @@ npm test
 npm run test:package
 ```
 
-- [ ] `npm test`: 13 protocol tests, plus 7 SSH setup tests against an in-process SSH server.
+```bash
+npm run test:app
+```
+
+- [ ] `npm test`: the protocol tests (transfers, pause and resume, authorized computers and more), the `~/.ssh/config` reader, and the SSH setup tests against an in-process SSH server.
 - [ ] `npm run test:package`: packs the npm tarball, installs it like `npm i -g`, and runs the setup tests with that copy.
+- [ ] `npm run test:app`: the desktop app itself, driven by scripts against throwaway servers: file selection with real mouse input, transfers, terminal, themes, passphrases, authorized computers, diagnostics and server updates. Screenshots land in `.test-home/app/<test>/shots`.
 
 ## 2. Command line from npm
 

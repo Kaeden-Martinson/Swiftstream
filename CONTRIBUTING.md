@@ -31,6 +31,7 @@ Run the desktop app from source with `npm run app`.
 ## Pull requests
 
 - Keep each one to one change, and add a test when you change behavior. `npm test` must pass; CI runs it on Linux, Windows and macOS.
+- For the desktop app, `npm run test:app` drives the real app (see `test/app/`); add a `*.test.js` there for UI changes.
 - Write user-facing text in plain words: say what happened and what to do next.
 - Add a line under **Unreleased** in `CHANGELOG.md` for anything a user would notice.
 

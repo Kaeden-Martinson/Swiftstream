@@ -43,7 +43,8 @@
     "release": "node scripts/release.mjs",
     "publish-site": "node scripts/publish-site.mjs",
     "prepack": "node scripts/build.mjs --no-exe",
-    "test:package": "node test/package.js"
+    "test:package": "node test/package.js",
+    "test:app": "node test/app/run.js"
   },
   "dependencies": {
     "selfsigned": "^2.4.1",

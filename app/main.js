@@ -17,6 +17,24 @@ import { walk } from './core/util.js';
 
 const dirname = import.meta.dirname;
 let win = null;
+
+// Windows groups and pins taskbar buttons by this ID. It matches build.appId in package.json, which the
+// installer gives its Start menu shortcut, so a pinned button keeps the Swiftstream name and logo.
+const APP_ID = 'dev.swiftstream.desktop';
+if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
+
+/** Name, icon and launch command Windows uses for a pinned taskbar button. */
+function setTaskbarDetails() {
+  if (process.platform !== 'win32') return;
+  win.setAppDetails({
+    appId: APP_ID,
+    // The installed exe carries the icon; a source checkout (electron.exe) points at the .ico instead.
+    appIconPath: app.isPackaged ? process.execPath : path.join(dirname, 'build', 'icon.ico'),
+    appIconIndex: 0,
+    relaunchCommand: app.isPackaged ? `"${process.execPath}"` : `"${process.execPath}" "${app.getAppPath()}"`,
+    relaunchDisplayName: 'Swiftstream',
+  });
+}
 const clients = new Map(); // host name -> logged-in SwiftClient
 const terminals = new Map(); // terminal id -> { channel, host }
 const probes = new Map(); // url -> fetched certificate waiting for the user's "trust" click
@@ -517,7 +535,7 @@ function createWindow() {
     // No system title bar: the tab bar is the title bar, with the window buttons drawn on it.
     titleBarStyle: 'hidden',
     ...(process.platform === 'darwin' ? {} : { titleBarOverlay: titleBarOverlay() }),
-    icon: path.join(dirname, 'build', 'icon.png'),
+    icon: path.join(dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
       preload: path.join(dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -525,6 +543,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  setTaskbarDetails();
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -563,7 +582,20 @@ function createWindow() {
   }
 }
 
+// One app at a time: opening it again (Start menu, taskbar, "swiftstream app") brings the window back.
+// Screenshot runs during development are exempt so they can run beside your open app.
+const isShot = !app.isPackaged && !!process.env.SWIFTSTREAM_SHOT;
+const firstInstance = isShot || app.requestSingleInstanceLock();
+if (!firstInstance) app.quit();
+app.on('second-instance', () => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 app.whenReady().then(() => {
+  if (!firstInstance) return;
   applyTheme();
   createWindow();
   scheduleHealth();

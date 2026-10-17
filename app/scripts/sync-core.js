@@ -17,4 +17,11 @@ if (!fs.existsSync(bundle)) {
 fs.rmSync(dest, { recursive: true, force: true });
 fs.cpSync(path.join(repo, 'src'), dest, { recursive: true });
 fs.copyFileSync(bundle, path.join(dest, 'swiftstream.cjs'));
+// The installer ships the standalone swiftstream.exe and puts its folder on PATH (see build/installer.nsh).
+const exe = path.join(repo, 'dist', 'swiftstream.exe');
+if (fs.existsSync(exe)) fs.copyFileSync(exe, path.join(appDir, 'build', 'cli', 'swiftstream.exe'));
+else if (process.argv.includes('--for-installer')) {
+  console.error('dist/swiftstream.exe is missing. Run "npm run build" in the repository root first.');
+  process.exit(1);
+}
 console.log(`synced ${fs.readdirSync(dest).length} core files into app/core (including the server bundle)`);

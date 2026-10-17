@@ -20,6 +20,7 @@ import { formatBytes, parseSize } from '../src/util.js';
 
 import { VERSION } from '../src/version.js';
 import { selfCommand } from '../src/self.js';
+import { openDesktopApp } from '../src/desktop.js';
 
 const OPTIONS = {
   port: { type: 'string' },
@@ -74,6 +75,16 @@ async function withClient(name, opts, fn) {
 }
 
 const COMMANDS = {
+  app: {
+    group: 'Get started',
+    usage: 'app',
+    summary: 'Open the Swiftstream desktop app',
+    async run() {
+      openDesktopApp();
+      ok('Opening the Swiftstream app');
+    },
+  },
+
   setup: {
     group: 'Get started',
     usage: 'setup',

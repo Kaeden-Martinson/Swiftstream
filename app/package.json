@@ -9,7 +9,7 @@
   "scripts": {
     "sync-core": "node scripts/sync-core.js",
     "start": "npm run sync-core && electron .",
-    "dist": "npm run sync-core && electron-builder --win --publish never",
+    "dist": "npm run sync-core -- --for-installer && node scripts/make-installer.js && electron-builder --win --publish never",
     "icon": "electron scripts/make-icon.js"
   },
   "dependencies": {
@@ -37,6 +37,7 @@
       "renderer/**",
       "core/**",
       "build/icon.png",
+      "build/icon.ico",
       "!**/*.map"
     ],
     "asar": true,
@@ -50,7 +51,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -59,7 +60,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Swiftstream",
-      "artifactName": "Swiftstream-Setup-${version}.exe"
+      "artifactName": "Swiftstream-Setup-${version}.exe",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": "dmg",
@@ -73,6 +75,16 @@
       ],
       "category": "Development",
       "icon": "build/icon.png"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/cli",
+        "to": "cli",
+        "filter": [
+          "swiftstream.exe",
+          "sws.cmd"
+        ]
+      }
+    ]
   }
 }

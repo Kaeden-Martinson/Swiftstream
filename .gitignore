@@ -7,3 +7,4 @@ superpowers/
 dist/
 site/downloads/
 app/release/
+app/build/cli/swiftstream.exe

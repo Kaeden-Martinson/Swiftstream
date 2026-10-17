@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('swift', {
   },
   copy: (text) => call('clipboard:write', text),
   readClipboard: () => call('clipboard:read'),
+  onAsk: on('ask'),
+  answer: (id, value) => ipcRenderer.send('ask:answer', id, value),
   state: { get: () => call('state:get'), set: (patch) => call('state:set', patch) },
   onNav: on('nav'),
   devShot: (name) => call('dev:shot', name), // development screenshot runs only (see main.js)

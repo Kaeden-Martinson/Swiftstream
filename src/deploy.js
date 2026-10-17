@@ -36,6 +36,7 @@ export async function deployOverSsh({
   authorizeSsh = true,
   password,
   askPassword,
+  askPassphrase, // ({ file, attempt }) => passphrase, or null to skip that key
   confirmHostKey = async () => true,
   onStep = () => {},
   bundlePath,
@@ -48,7 +49,7 @@ export async function deployOverSsh({
 
   onStep(`Connecting to ${host}`);
   const ownKey = identityKey ? sshPrivateKeyPem(identityKey) : null;
-  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey, ownKey, identityFile });
+  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, askPassphrase, confirmHostKey, ownKey, identityFile });
   try {
     onStep('Checking the server');
     const facts = await probe(session);
@@ -114,20 +115,22 @@ export function parseTarget(target) {
 // ---- SSH connection ---------------------------------------------------------
 
 /**
- * Unencrypted private keys ssh2 can use, tried before asking for a password: the host's IdentityFile
- * from ~/.ssh/config first, then the usual ~/.ssh/id_* files.
+ * Private keys to try before the password: the host's IdentityFile from ~/.ssh/config first, then the
+ * usual ~/.ssh/id_* files. Keys with a passphrase come back separately, to ask for it only if needed.
  */
 function localKeys(identityFile) {
   const dir = path.join(os.homedir(), '.ssh');
   const keys = [];
+  const encrypted = [];
   const files = [identityFile, ...['id_ed25519', 'id_ecdsa', 'id_rsa'].map((n) => path.join(dir, n))].filter(Boolean);
   for (const file of new Set(files)) {
     if (!fs.existsSync(file)) continue;
     const data = fs.readFileSync(file);
     const parsed = utils.parseKey(data);
-    if (!(parsed instanceof Error)) keys.push(data); // encrypted keys parse as an Error without a passphrase
+    if (!(parsed instanceof Error)) keys.push(data);
+    else if (/encrypted|passphrase/i.test(parsed.message)) encrypted.push({ file, data });
   }
-  return keys;
+  return { keys, encrypted };
 }
 
 function hostKeyFingerprint(key) {
@@ -167,7 +170,7 @@ function sshAgent() {
   return null;
 }
 
-async function sshConnect({ username, host, port, password, askPassword, confirmHostKey, ownKey, identityFile }) {
+async function sshConnect({ username, host, port, password, askPassword, askPassphrase, confirmHostKey, ownKey, identityFile }) {
   await checkReachable(host, port);
   const known = readJson(KNOWN_HOSTS, {});
   const hostId = port === 22 ? host : `[${host}]:${port}`;
@@ -178,18 +181,35 @@ async function sshConnect({ username, host, port, password, askPassword, confirm
   const agent = sshAgent();
   if (agent) attempts.push({ type: 'agent', username, agent });
   if (ownKey) attempts.push({ type: 'publickey', username, key: ownKey }); // authorized by an earlier setup
-  for (const key of localKeys(identityFile)) attempts.push({ type: 'publickey', username, key });
+  const local = localKeys(identityFile);
+  for (const key of local.keys) attempts.push({ type: 'publickey', username, key });
+  // Keys with a passphrase: ask for it, unless a password was given up front (then that's the plan).
+  if (askPassphrase && !password) for (const k of local.encrypted) attempts.push({ type: 'passphrase-slot', ...k });
   const passwordTries = password || !askPassword ? 1 : 3;
   for (let i = 0; i < passwordTries; i++) attempts.push({ type: 'password-slot', attempt: i });
   let next = 0;
   let lastPasswordUsed = false;
   let usedPassword = null;
 
+  /** Ask for a key's passphrase until it opens the key (checked here, before the server sees it). */
+  const unlockKey = async ({ file, data }) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const passphrase = await askPassphrase({ file, attempt });
+      if (passphrase == null || passphrase === '') return null; // skipped
+      if (!(utils.parseKey(data, passphrase) instanceof Error)) return { passphrase };
+    }
+    return null;
+  };
+
   const authHandler = (methodsLeft, _partial, callback) => {
     const step = () => {
       if (next >= attempts.length) return callback(false);
       const attempt = attempts[next++];
       const allowed = (m) => !methodsLeft || methodsLeft.includes(m);
+      if (attempt.type === 'passphrase-slot') {
+        if (!allowed('publickey')) return step();
+        return unlockKey(attempt).then((key) => (key ? callback({ type: 'publickey', username, key: attempt.data, passphrase: key.passphrase }) : step()), () => step());
+      }
       if (attempt.type !== 'password-slot') return allowed('publickey') ? callback(attempt) : step();
       if (!allowed('password') && !allowed('keyboard-interactive')) return callback(false);
       const getPassword = password && attempt.attempt === 0 ? Promise.resolve(password) : askPassword ? askPassword(attempt.attempt) : Promise.reject(new Error('no password'));

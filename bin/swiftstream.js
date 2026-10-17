@@ -464,6 +464,13 @@ async function deployCommand(name, target, opts, { quiet = false, keyOnly = fals
           attempt && !process.stdin.isTTY
         ? Promise.reject(new UserError('Wrong password.'))
         : askSecret(attempt ? 'Wrong password, try again:' : `Password for ${target}:`),
+    // A key with a passphrase: asked for here, never stored. Enter skips it (then the password is asked).
+    askPassphrase: ({ file, attempt }) => {
+      // Only at a keyboard: piped input (scripts) carries the password, not passphrases.
+      if (keyOnly || !process.stdin.isTTY) return Promise.resolve(null);
+      const shown = file.startsWith(os.homedir()) ? `~${file.slice(os.homedir().length).replace(/\\/g, '/')}` : file;
+      return askSecret(attempt ? 'Wrong passphrase, try again (Enter to skip):' : `Passphrase for ${shown} (Enter to skip):`);
+    },
     confirmHostKey: async ({ host: sshHost, fingerprint }) => {
       console.error(`
   First connection to ${c.bold(sshHost)}. Its SSH key fingerprint is:

@@ -140,6 +140,21 @@ handle('sshconfig:list', () => {
     .map((e) => ({ alias: e.alias, target: sshTarget(e), port: e.port, identityFile: e.identityFile }));
 });
 
+// Questions for the person at the window during setup (a key's passphrase). Answers aren't stored.
+const pendingAsks = new Map();
+let askSeq = 0;
+function askWindow(kind, payload) {
+  return new Promise((resolve) => {
+    const id = ++askSeq;
+    pendingAsks.set(id, resolve);
+    send('ask', { id, kind, ...payload });
+  });
+}
+ipcMain.on('ask:answer', (_e, id, value) => {
+  pendingAsks.get(id)?.(typeof value === 'string' ? value : null);
+  pendingAsks.delete(id);
+});
+
 handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile }) => {
   dropClient(name);
   const { info } = await deployHost({
@@ -150,6 +165,7 @@ handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile })
     // Used for this one login (and sudo, if Node.js must be installed). Never stored.
     password: password || undefined,
     identityFile: identityFile || undefined, // IdentityFile from ~/.ssh/config, tried first
+    askPassphrase: ({ file, attempt }) => askWindow('passphrase', { file, attempt, target }),
     bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
     // The SSH host key is remembered on first use; a changed key is refused (see core/deploy.js).
     confirmHostKey: async () => true,

@@ -236,6 +236,19 @@ api.hosts.onDeployStep(({ text }) => {
   if (!$('add-progress').hidden) $('add-progress-text').textContent = `${text}…`;
 });
 
+// Setup asks for a key's passphrase when the key has one (see askPassphrase in main.js).
+api.onAsk(async ({ id, kind, file, attempt, target }) => {
+  if (kind !== 'passphrase') return api.answer(id, null);
+  const keyName = file.split(/[\\/]/).pop();
+  const value = await prompt({
+    title: attempt ? 'Wrong passphrase' : `Passphrase for ${keyName}`,
+    text: `Your SSH key ${keyName} is protected with a passphrase. Enter it to log in to ${target}, or Cancel to use the account's password instead. It isn't saved.`,
+    secret: true,
+    ok: 'Unlock key',
+  });
+  api.answer(id, value || null);
+});
+
 addForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   setAddError(null);

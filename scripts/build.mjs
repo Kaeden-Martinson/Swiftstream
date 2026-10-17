@@ -7,9 +7,11 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
-const root = path.dirname(import.meta.dirname);
+// fileURLToPath rather than import.meta.dirname, so the build also runs on Node 18.
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dist = path.join(root, 'dist');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const bundlePath = path.join(dist, 'swiftstream.cjs');

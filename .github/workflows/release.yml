@@ -1,0 +1,93 @@
+# Release: push a tag like v0.1.2 (matching package.json) and this builds, tests and publishes everything.
+#   - GitHub Release with the installer, the standalone exe, the portable .cjs, SHA256SUMS.txt,
+#     latest.json (the website's download list) and latest.yml (the desktop app's auto-update feed)
+#   - npm package, published with provenance through npm trusted publishing (no token needed)
+# See docs/RELEASING.md for the one-time setup.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check version and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Tag matches package.json and app/package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cli=$(node -p "require('./package.json').version")
+          app=$(node -p "require('./app/package.json').version")
+          if [ "$tag" != "$cli" ] || [ "$tag" != "$app" ]; then
+            echo "::error::Tag v$tag doesn't match package.json ($cli) and app/package.json ($app)"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm test
+
+  windows:
+    name: Build downloads and create the GitHub Release
+    needs: check
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix app
+      - name: Build the installer, standalone exe and portable CLI
+        run: npm run release
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]") || index($0, " " v)) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "See the commits for this version." > notes.md; fi
+      - name: Create the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=(site/downloads/*)
+          for extra in app/release/latest.yml "app/release/Swiftstream-Setup-${GITHUB_REF_NAME#v}.exe.blockmap"; do
+            [ -f "$extra" ] && files+=("$extra")
+          done
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "Swiftstream ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+
+  npm:
+    name: Publish to npm
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: npm 11.5+ (trusted publishing)
+        run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm publish --access public --provenance

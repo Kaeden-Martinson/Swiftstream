@@ -42,7 +42,9 @@ add(path.join(root, 'dist', 'swiftstream.cjs'), `swiftstream-${version}.cjs`, 'c
 
 if (!process.argv.includes('--no-app')) {
   step('Building the desktop app installer');
-  run(npm, ['run', 'sync-core'], appDir);
+  // Same steps as "npm run dist" in app/: copy the CLI (and swiftstream.exe for PATH) in, write the installer script.
+  run(npm, ['run', 'sync-core', '--', '--for-installer'], appDir);
+  run(process.execPath, [path.join(appDir, 'scripts', 'make-installer.js')]);
   // Its own output folder, so a copy of the app running from app/dist doesn't lock the build.
   run(npm, ['exec', '--', 'electron-builder', '--win', '--publish', 'never', '--config.directories.output=release'], appDir);
   add(path.join(appDir, 'release', `Swiftstream-Setup-${appVersion}.exe`), `Swiftstream-Setup-${appVersion}.exe`, 'app-windows', 'Desktop app, Windows 64-bit');

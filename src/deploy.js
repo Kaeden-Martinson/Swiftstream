@@ -39,6 +39,7 @@ export async function deployOverSsh({
   confirmHostKey = async () => true,
   onStep = () => {},
   bundlePath,
+  identityFile, // a private key to try first, e.g. IdentityFile from ~/.ssh/config
 }) {
   if (!/^swift(stream|ssh)-ed25519 [A-Za-z0-9+/=]+$/.test(publicKey)) throw new Error('Invalid public key');
   const { username, host } = parseTarget(target);
@@ -47,7 +48,7 @@ export async function deployOverSsh({
 
   onStep(`Connecting to ${host}`);
   const ownKey = identityKey ? sshPrivateKeyPem(identityKey) : null;
-  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey, ownKey });
+  const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, confirmHostKey, ownKey, identityFile });
   try {
     onStep('Checking the server');
     const facts = await probe(session);
@@ -112,12 +113,15 @@ export function parseTarget(target) {
 
 // ---- SSH connection ---------------------------------------------------------
 
-/** Unencrypted private keys from ~/.ssh that ssh2 can use, tried before asking for a password. */
-function localKeys() {
+/**
+ * Unencrypted private keys ssh2 can use, tried before asking for a password: the host's IdentityFile
+ * from ~/.ssh/config first, then the usual ~/.ssh/id_* files.
+ */
+function localKeys(identityFile) {
   const dir = path.join(os.homedir(), '.ssh');
   const keys = [];
-  for (const name of ['id_ed25519', 'id_ecdsa', 'id_rsa']) {
-    const file = path.join(dir, name);
+  const files = [identityFile, ...['id_ed25519', 'id_ecdsa', 'id_rsa'].map((n) => path.join(dir, n))].filter(Boolean);
+  for (const file of new Set(files)) {
     if (!fs.existsSync(file)) continue;
     const data = fs.readFileSync(file);
     const parsed = utils.parseKey(data);
@@ -149,7 +153,21 @@ function checkReachable(host, port) {
   });
 }
 
-async function sshConnect({ username, host, port, password, askPassword, confirmHostKey, ownKey }) {
+/** The running SSH agent: SSH_AUTH_SOCK, or on Windows the OpenSSH agent service's pipe. */
+function sshAgent() {
+  if (process.env.SSH_AUTH_SOCK) return process.env.SSH_AUTH_SOCK;
+  if (process.platform === 'win32') {
+    const pipe = '\\\\.\\pipe\\openssh-ssh-agent';
+    try {
+      if (fs.existsSync(pipe)) return pipe;
+    } catch {
+      /* no agent */
+    }
+  }
+  return null;
+}
+
+async function sshConnect({ username, host, port, password, askPassword, confirmHostKey, ownKey, identityFile }) {
   await checkReachable(host, port);
   const known = readJson(KNOWN_HOSTS, {});
   const hostId = port === 22 ? host : `[${host}]:${port}`;
@@ -157,9 +175,10 @@ async function sshConnect({ username, host, port, password, askPassword, confirm
 
   // Try keys first (agent, then ~/.ssh), then the password; ask for it only when needed.
   const attempts = [];
-  if (process.env.SSH_AUTH_SOCK) attempts.push({ type: 'agent', username, agent: process.env.SSH_AUTH_SOCK });
+  const agent = sshAgent();
+  if (agent) attempts.push({ type: 'agent', username, agent });
   if (ownKey) attempts.push({ type: 'publickey', username, key: ownKey }); // authorized by an earlier setup
-  for (const key of localKeys()) attempts.push({ type: 'publickey', username, key });
+  for (const key of localKeys(identityFile)) attempts.push({ type: 'publickey', username, key });
   const passwordTries = password || !askPassword ? 1 : 3;
   for (let i = 0; i < passwordTries; i++) attempts.push({ type: 'password-slot', attempt: i });
   let next = 0;

@@ -36,7 +36,7 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "test": "node test/e2e.js && node test/bootstrap.js",
+    "test": "node test/e2e.js && node test/sshconfig.js && node test/bootstrap.js",
     "app": "npm --prefix app start",
     "app:dist": "npm --prefix app run dist",
     "build": "node scripts/build.mjs",

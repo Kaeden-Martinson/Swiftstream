@@ -21,6 +21,7 @@ import { formatBytes, parseSize } from '../src/util.js';
 import { VERSION, isOlderVersion } from '../src/version.js';
 import { selfCommand } from '../src/self.js';
 import { openDesktopApp } from '../src/desktop.js';
+import { readSshConfig, sshConfigHost, sshTarget } from '../src/sshconfig.js';
 
 const OPTIONS = {
   port: { type: 'string' },
@@ -148,6 +149,47 @@ background, authorizes this computer's key, and pins the server's identity.
       const hosts = Object.entries(loadHosts());
       if (!hosts.length) return info(`No servers yet. Run ${c.bold('swiftstream setup')} to add one.`);
       console.log(table([['NAME', 'ADDRESS', 'SSH LOGIN'], ...hosts.map(([n, h]) => [n, new URL(h.url).host, h.ssh || '-'])]));
+    },
+  },
+
+  import: {
+    group: 'Hosts',
+    usage: 'import [alias...] [--yes]',
+    summary: 'Set up servers from your ~/.ssh/config',
+    details: `Lists the hosts in ~/.ssh/config that aren't saved yet and sets up the ones you pick, using
+their HostName, User, Port and IdentityFile. Name aliases to set up just those; --yes sets up all of them.`,
+    async run(aliases, opts) {
+      const hosts = loadHosts();
+      const known = new Set(Object.values(hosts).map((h) => h.ssh));
+      const fresh = readSshConfig().filter((e) => !hosts[e.alias] && !known.has(sshTarget(e)));
+      if (!fresh.length) return info('Every host in ~/.ssh/config is already saved (or there is no ~/.ssh/config).');
+      let chosen = fresh;
+      if (aliases.length) {
+        chosen = fresh.filter((e) => aliases.some((a) => a.toLowerCase() === e.alias.toLowerCase()));
+        const missing = aliases.filter((a) => !fresh.some((e) => e.alias.toLowerCase() === a.toLowerCase()));
+        if (missing.length) warn(`Not in ~/.ssh/config, or already saved: ${missing.join(', ')}`);
+      } else if (!opts.yes) {
+        console.log(table([['ALIAS', 'SSH LOGIN', 'PORT'], ...fresh.map((e) => [e.alias, sshTarget(e), String(e.port)])]));
+        const answer = (await ask(`Set up which? Type aliases separated by spaces, or "all"`, 'all')).trim();
+        if (!answer) return;
+        if (answer.toLowerCase() !== 'all') {
+          const picks = answer.split(/[\s,]+/).map((a) => a.toLowerCase());
+          chosen = fresh.filter((e) => picks.includes(e.alias.toLowerCase()));
+        }
+      }
+      let done = 0;
+      for (const entry of chosen) {
+        console.error('');
+        info(`Setting up ${c.bold(entry.alias)} (${sshTarget(entry)})`);
+        try {
+          await deployCommand(entry.alias, sshTarget(entry), { ...opts, 'ssh-port': entry.port }, { quiet: true, identityFile: entry.identityFile });
+          done++;
+        } catch (err) {
+          printError(err);
+        }
+      }
+      if (chosen.length) console.error(`\n${done} of ${chosen.length} set up.`);
+      if (done < chosen.length) process.exitCode = 1;
     },
   },
 
@@ -349,6 +391,16 @@ const ALIASES = { keygen: 'key', ls: 'hosts', rm: 'remove', ssh: 'connect', uplo
 async function resolveOrSetUp(target, opts) {
   const hosts = loadHosts();
   if (hosts[target]) return target;
+  // An alias from ~/.ssh/config means the same machine it does for ssh.
+  const entry = !target.includes('@') && sshConfigHost(target);
+  if (entry) {
+    const login = sshTarget(entry);
+    const saved = Object.entries(hosts).find(([, h]) => h.ssh === login);
+    if (saved) return saved[0];
+    info(`Using "${entry.alias}" from ~/.ssh/config: ${login}${entry.port !== 22 ? ` port ${entry.port}` : ''}`);
+    await deployCommand(opts.name || entry.alias, login, { ...opts, 'ssh-port': opts['ssh-port'] || entry.port }, { quiet: true, identityFile: entry.identityFile });
+    return opts.name || entry.alias;
+  }
   const looksLikeLogin = target.includes('@') || /[.:]/.test(target);
   if (!looksLikeLogin) getHostOrExplain(target); // throws, with a "did you mean"
   const saved = Object.entries(hosts).find(([, h]) => h.ssh === target);
@@ -359,7 +411,6 @@ async function resolveOrSetUp(target, opts) {
   return name;
 }
 
-/** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
 /**
  * A server running an older Swiftstream than this one is updated before the shell opens: same SSH
  * login as setup, normally with this computer's key. If that fails, the old version is used.
@@ -384,6 +435,7 @@ async function updateServerIfOlder(name, opts) {
   }
 }
 
+/** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
 async function withServerRunning(name, opts, fn) {
   try {
     return await fn();
@@ -397,13 +449,14 @@ async function withServerRunning(name, opts, fn) {
   }
 }
 
-async function deployCommand(name, target, opts, { quiet = false, keyOnly = false } = {}) {
+async function deployCommand(name, target, opts, { quiet = false, keyOnly = false, identityFile } = {}) {
   validateHostName(name);
   const { host, info: remote } = await deployHost({
     name,
     target,
     sshPort: opts['ssh-port'],
     port: Number(opts.port) || DEFAULT_PORT,
+    identityFile,
     askPassword: (attempt) =>
       keyOnly
         ? Promise.reject(new UserError("this computer's SSH key wasn't accepted"))

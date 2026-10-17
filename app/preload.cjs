@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('swift', {
     remove: (name) => call('hosts:remove', name),
     update: (name, changes) => call('hosts:update', name, changes),
     info: (name) => call('hosts:info', name),
+    sshConfig: () => call('sshconfig:list'),
   },
   files: {
     ls: (name, dir) => call('fs:ls', name, dir),

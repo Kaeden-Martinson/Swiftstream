@@ -16,6 +16,7 @@ import { openChannel } from './core/shell.js';
 import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js';
 import { walk } from './core/util.js';
 import { VERSION, isOlderVersion } from './core/version.js';
+import { readSshConfig, sshTarget } from './core/sshconfig.js';
 
 const dirname = import.meta.dirname;
 let win = null;
@@ -130,7 +131,16 @@ const savedPort = (name) => {
   return host ? Number(new URL(host.url).port) || undefined : undefined;
 };
 
-handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
+/** Hosts in ~/.ssh/config that aren't saved yet, for "From your SSH config" on the Servers page. */
+handle('sshconfig:list', () => {
+  const hosts = loadHosts();
+  const known = new Set(Object.values(hosts).map((h) => h.ssh));
+  return readSshConfig()
+    .filter((e) => !hosts[e.alias] && !known.has(sshTarget(e)))
+    .map((e) => ({ alias: e.alias, target: sshTarget(e), port: e.port, identityFile: e.identityFile }));
+});
+
+handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile }) => {
   dropClient(name);
   const { info } = await deployHost({
     name,
@@ -139,6 +149,7 @@ handle('hosts:deploy', async ({ name, target, sshPort, password }) => {
     port: savedPort(name),
     // Used for this one login (and sudo, if Node.js must be installed). Never stored.
     password: password || undefined,
+    identityFile: identityFile || undefined, // IdentityFile from ~/.ssh/config, tried first
     bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
     // The SSH host key is remembered on first use; a changed key is refused (see core/deploy.js).
     confirmHostKey: async () => true,
@@ -584,7 +595,9 @@ function createWindow() {
     win.webContents.once('did-finish-load', async () => {
       await sleep(600);
       if (process.env.SWIFTSTREAM_SHOT_JS) {
-        const result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSTREAM_SHOT_JS, 'utf8'));
+        const result = await win.webContents.executeJavaScript(fs.readFileSync(process.env.SWIFTSTREAM_SHOT_JS, 'utf8')).catch((err) => {
+          console.log('shot script error:', err.message); // still take the screenshot and quit
+        });
         if (result !== undefined) console.log('shot script result:', JSON.stringify(result));
         for (const step of result?.input || []) {
           if (step.wait) await sleep(step.wait);

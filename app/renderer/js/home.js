@@ -3,6 +3,7 @@
 
 async function loadHosts() {
   state.hosts = await call(api.hosts.list());
+  state.sshConfig = await call(api.hosts.sshConfig()).catch(() => []);
   const groups = [...new Set(state.hosts.map((h) => h.group).filter(Boolean))].sort();
   $('group-options').replaceChildren(...groups.map((g) => el('option', { value: g })));
   renderHome();
@@ -63,6 +64,7 @@ function renderHome() {
     byGroup.get(key).push(h);
   }
   const keys = [...byGroup.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+  const importable = (state.sshConfig || []).filter((e) => !query || [e.alias, e.target].some((v) => v.toLowerCase().includes(query.toLowerCase())));
   $('groups').replaceChildren(
     ...keys.map((key) =>
       el(
@@ -72,7 +74,41 @@ function renderHome() {
         el('div', { className: 'host-grid' }, ...byGroup.get(key).map(hostCard)),
       ),
     ),
+    ...(importable.length
+      ? [
+          el(
+            'section',
+            { className: 'group import-group' },
+            el('h2', {}, 'From your SSH config', el('span', { className: 'count', textContent: String(importable.length) })),
+            el('div', { className: 'host-grid' }, ...importable.map(importCard)),
+          ),
+        ]
+      : []),
   );
+  // With hosts to import, their cards are the way to start; the empty-state block would repeat it.
+  if (importable.length && !state.hosts.length) $('home-empty').hidden = true;
+}
+
+/** A host from ~/.ssh/config that isn't set up yet. */
+function importCard(entry, index) {
+  const setUp = el('button', { type: 'button', className: 'btn btn-small', textContent: 'Set up' });
+  const card = el(
+    'div',
+    { className: 'host-card import-card', style: `--i:${Math.min(index, 12)}` },
+    el('span', { className: 'host-avatar' }, icon('server')),
+    el(
+      'span',
+      { className: 'host-meta' },
+      el('span', { className: 'host-name', textContent: entry.alias }),
+      el('span', { className: 'host-sub muted', textContent: entry.port !== 22 ? `${entry.target} · port ${entry.port}` : entry.target }),
+      el('span', { className: 'host-os', textContent: entry.identityFile ? `Key: ${entry.identityFile.split(/[\\/]/).pop()}` : 'Not set up yet' }),
+    ),
+    setUp,
+  );
+  const open = () => openAddDialog({ target: entry.target, sshPort: entry.port, name: entry.alias, identityFile: entry.identityFile });
+  setUp.addEventListener('click', open);
+  card.addEventListener('dblclick', open);
+  return card;
 }
 
 function hostCard(host, index) {
@@ -139,17 +175,21 @@ $('search-form').addEventListener('submit', (e) => {
 const addForm = $('add-form');
 let addStep = 'form'; // form -> trust -> authorize (direct mode only)
 let probed = null;
+let addIdentityFile = null; // IdentityFile from ~/.ssh/config, when set up from there
 
 const addMode = () => addForm.elements.mode.value;
 
-function openAddDialog({ target = '' } = {}) {
+function openAddDialog({ target = '', sshPort = null, name = '', identityFile = null } = {}) {
   addForm.reset();
   addStep = 'form';
   probed = null;
+  addIdentityFile = identityFile;
   syncAddDialog();
   setAddBusy(null);
   setAddError(null);
   addForm.elements.target.value = target;
+  addForm.elements.name.value = name;
+  addForm.elements.sshPort.value = sshPort && sshPort !== 22 ? String(sshPort) : '';
   addForm.elements.name.placeholder = suggestName(target) || 'prod';
   $('add-dialog').showModal();
   (target ? addForm.elements.password : addForm.elements.target).focus();
@@ -208,7 +248,7 @@ addForm.addEventListener('submit', async (e) => {
       setAddBusy(`Connecting to ${target}…`);
       const password = f.password.value;
       f.password.value = ''; // don't keep it in the form
-      await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null, password }));
+      await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null, password, identityFile: addIdentityFile }));
       if (f.group.value.trim()) await call(api.hosts.update(name, { group: f.group.value.trim() }));
       $('add-dialog').close();
       $('search').value = '';

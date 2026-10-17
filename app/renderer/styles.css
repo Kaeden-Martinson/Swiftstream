@@ -431,3 +431,8 @@ option { background: var(--panel); color: var(--text); }
 .update-btn:hover { background: var(--accent-drop); }
 .update-btn svg { width: 15px; height: 15px; }
 .update-btn[hidden] { display: none; }
+
+/* Servers page: hosts from ~/.ssh/config that aren't set up yet */
+.import-card { cursor: default; border-style: dashed; }
+.import-card .host-avatar { color: var(--muted); background: var(--panel-2); }
+.import-card .btn { margin-left: auto; align-self: center; }

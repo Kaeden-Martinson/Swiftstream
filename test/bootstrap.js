@@ -34,7 +34,7 @@ const freePort = () =>
   });
 
 // ---- a minimal SSH server: password auth, exec runs `sh -c` as that user's "home" ----
-const users = { tester: { password: 's3cret', home: path.join(work, 'home-tester') }, second: { password: 'hunter2', home: path.join(work, 'home-second') } };
+const users = { tester: { password: 's3cret', home: path.join(work, 'home-tester') }, second: { password: 'hunter2', home: path.join(work, 'home-second') }, third: { password: 'pa55', home: path.join(work, 'home-third') } };
 for (const u of Object.values(users)) fs.mkdirSync(u.home, { recursive: true });
 
 function startSshServer(port, hostKey) {
@@ -184,6 +184,22 @@ try {
     console.log('skip standalone exe (run "npm run build" to include it)');
   }
 
+  // An alias from ~/.ssh/config works like it does for ssh: connect sets it up under that name.
+  const fakeHome = path.join(work, 'fake-home');
+  fs.mkdirSync(path.join(fakeHome, '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(fakeHome, '.ssh', 'config'), `Host lab\n  HostName 127.0.0.1\n  User third\n  Port ${sshPort}\n\nHost other\n  HostName 127.0.0.1\n  User nobody\n`);
+  const homeEnv = { HOME: fakeHome, USERPROFILE: fakeHome };
+  const port3 = await freePort();
+  r = await ok(['connect', 'lab', '--port', String(port3), '--yes'], { input: 'pa55\necho via-alias\nexit\n', env: homeEnv });
+  assert.match(r.err, /Using "lab" from ~\/\.ssh\/config: third@127\.0\.0\.1/);
+  assert.match(r.out, /via-alias/);
+  r = await ok(['hosts']);
+  assert.match(r.out, /lab\s+\S+\s+third@127\.0\.0\.1/);
+  // import lists only what isn't saved yet: "lab" is, "other" isn't.
+  r = await run(['import', 'lab'], { env: homeEnv });
+  assert.match(r.err, /already saved: lab/);
+  console.log('ok  ~/.ssh/config alias: connect sets it up; import skips saved hosts');
+
   // A different SSH host key on the same address must be refused.
   sshServer.close();
   sshServer = await startSshServer(sshPort, rsaKey());
@@ -197,4 +213,5 @@ try {
   sshServer.close();
   stopRemote(users.tester);
   stopRemote(users.second);
+  stopRemote(users.third);
 }

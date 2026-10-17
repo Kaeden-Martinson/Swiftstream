@@ -240,6 +240,8 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       } finally {
         await fh.close();
       }
+      // Canceled while this chunk was in flight: don't bring the upload's state back.
+      if (uploads.get(id) !== state) throw new HttpError(410, 'upload was canceled');
       state.received.add(index);
       persistUpload(id, state);
       return { ok: true };

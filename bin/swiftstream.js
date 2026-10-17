@@ -193,6 +193,38 @@ their HostName, User, Port and IdentityFile. Name aliases to set up just those; 
     },
   },
 
+  computers: {
+    group: 'Hosts',
+    usage: 'computers <name>',
+    summary: 'List the computers allowed to log in to a server',
+    async run([name]) {
+      need(name, this.usage);
+      const keys = await listComputers(name);
+      console.log(table([['COMPUTER', 'FINGERPRINT', ''], ...keys.map((k) => [k.label || '(no name)', k.fingerprint, k.current ? 'this computer' : ''])]));
+    },
+  },
+
+  revoke: {
+    group: 'Hosts',
+    usage: 'revoke <name> <computer> [--yes]',
+    summary: 'Stop a computer from logging in to a server',
+    details: `<computer> is its name as "swiftstream computers <name>" lists it, or the start of its fingerprint.
+Its open shells and transfers on that server end right away.`,
+    async run([name, which], opts) {
+      need(name && which, this.usage);
+      const keys = await listComputers(name);
+      const matches = keys.filter((k) => k.label === which || k.fingerprint === which || k.fingerprint.replace(/^SHA256:/, '').startsWith(which.replace(/^SHA256:/, '')));
+      if (!matches.length) throw new UserError(`No computer called "${which}" can log in to ${name}.`, `See them with: swiftstream computers ${name}`);
+      if (matches.length > 1) throw new UserError(`"${which}" matches ${matches.length} computers.`, 'Use more of the fingerprint.');
+      const [target] = matches;
+      const who = target.label || target.fingerprint;
+      if (target.current) warn(`${who} is this computer: after this, it can only reconnect by setting ${name} up again over SSH.`);
+      if (!opts.yes && !(await confirm(`Stop ${who} from logging in to ${name}?`))) return;
+      await withClient(name, {}, (conn) => conn.request('POST', '/v1/keys/revoke', { body: { fingerprint: target.fingerprint } }));
+      ok(`${who} can no longer log in to ${name}`);
+    },
+  },
+
   remove: {
     group: 'Hosts',
     usage: 'remove <name>',
@@ -409,6 +441,17 @@ async function resolveOrSetUp(target, opts) {
   for (let i = 2; !opts.name && hosts[name]; i++) name = `${defaultName(target)}-${i}`;
   await deployCommand(name, target, opts, { quiet: true });
   return name;
+}
+
+/** The computers allowed to log in to a server (needs a server from 0.1.2 on). */
+async function listComputers(name) {
+  try {
+    const { keys } = await withClient(name, {}, (conn) => conn.request('GET', '/v1/keys'));
+    return keys;
+  } catch (err) {
+    if (err.status === 404) throw new UserError(`${name} runs an older Swiftstream that can't list computers.`, `Update it by connecting once: swiftstream connect ${name}`);
+    throw err;
+  }
 }
 
 /**

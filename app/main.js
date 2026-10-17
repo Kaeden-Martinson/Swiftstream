@@ -191,6 +191,16 @@ handle('hosts:remove', (name) => {
 });
 
 handle('hosts:info', (name) => withClient(name, (c) => c.request('GET', '/v1/info')));
+// The computers allowed to log in to a server, and revoking one (servers from 0.1.2 on).
+handle('hosts:computers', async (name) => {
+  try {
+    return (await withClient(name, (c) => c.request('GET', '/v1/keys'))).keys;
+  } catch (err) {
+    if (err.status === 404) return null; // an older server: the app offers to update it
+    throw err;
+  }
+});
+handle('hosts:revoke', (name, fingerprint) => withClient(name, (c) => c.request('POST', '/v1/keys/revoke', { body: { fingerprint } })));
 
 // ---- files ------------------------------------------------------------------
 

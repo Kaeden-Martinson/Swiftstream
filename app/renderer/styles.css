@@ -492,3 +492,15 @@ option { background: var(--panel); color: var(--text); }
 .stepper { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--bg); }
 .stepper .icon-btn { width: 28px; height: 28px; font-size: 16px; font-weight: 600; }
 .stepper b { min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* Authorized computers dialog */
+.computer-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); margin: 4px 0 14px; }
+.computer-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.computer-row + .computer-row { border-top: 1px solid var(--line); }
+.computer-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--panel-2); color: var(--muted); flex: none; }
+.computer-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.4; }
+.computer-name { display: flex; align-items: center; gap: 8px; font-weight: 550; }
+.computer-fp { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.computer-old { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; font-size: 13px; }
+.computer-list > .muted, .computer-list > .form-error { padding: 12px; margin: 0; }

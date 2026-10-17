@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import { ensureDir, paths } from './config.js';
 
 const KEY_TYPE = 'swiftstream-ed25519';
@@ -117,12 +118,78 @@ export function readAuthorizedKeys() {
     .filter((l) => l && !l.startsWith('#'));
 }
 
-/** Adds a key to authorized_keys. Returns false if it was already present. */
+/**
+ * Adds a key to authorized_keys. Returns false if it was already present (a label given now is
+ * added to an unlabeled entry, so servers set up earlier learn which computer a key belongs to).
+ */
 export function authorizeKey(line) {
   decodePublicKey(line); // validate before writing
   const normalized = normalizePublicKey(line);
-  if (readAuthorizedKeys().some((k) => normalizePublicKey(k) === normalized)) return false;
+  const label = keyLabel(line);
+  const existing = readAuthorizedKeys().find((k) => normalizePublicKey(k) === normalized);
+  if (existing) {
+    if (label && !keyLabel(existing)) rewriteAuthorizedKeys((l) => (l.trim() === existing ? line.trim() : l));
+    return false;
+  }
   ensureDir();
   fs.appendFileSync(paths.authorizedKeys, line.trim() + '\n', { mode: 0o600 });
   return true;
+}
+
+/** The label after the key ("kaede@laptop"), or null. */
+const keyLabel = (line) => line.trim().split(/\s+/).slice(2).join(' ') || null;
+
+/** "user@computer" for this machine: saved with its key on a server, to tell computers apart there. */
+export function computerLabel() {
+  let user = 'user';
+  try {
+    user = os.userInfo().username;
+  } catch {
+    /* no user name available */
+  }
+  return `${user}@${os.hostname()}`.replace(/[^\w.@-]/g, '-').slice(0, 64);
+}
+
+/** The computers allowed to log in: [{ key, fingerprint, label }]. */
+export function authorizedKeyEntries() {
+  return readAuthorizedKeys().flatMap((line) => {
+    try {
+      decodePublicKey(line);
+      return [{ key: normalizePublicKey(line), fingerprint: keyFingerprint(line), label: keyLabel(line) }];
+    } catch {
+      return []; // not a Swiftstream key line
+    }
+  });
+}
+
+/** Remove the key with this fingerprint. Returns how many lines were removed. */
+export function removeAuthorizedKey(fingerprint) {
+  let removed = 0;
+  rewriteAuthorizedKeys((line) => {
+    try {
+      if (line.trim() && !line.trim().startsWith('#') && keyFingerprint(line) === fingerprint) {
+        removed++;
+        return null;
+      }
+    } catch {
+      /* keep lines we can't read */
+    }
+    return line;
+  });
+  return removed;
+}
+
+/** Rewrite authorized_keys line by line (map to null to drop a line), atomically. */
+function rewriteAuthorizedKeys(mapLine) {
+  let text = '';
+  try {
+    text = fs.readFileSync(paths.authorizedKeys, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1);
+  const next = lines.map(mapLine).filter((l) => l !== null);
+  const tmp = `${paths.authorizedKeys}.tmp`;
+  fs.writeFileSync(tmp, next.length ? next.join('\n') + '\n' : '', { mode: 0o600 });
+  fs.renameSync(tmp, paths.authorizedKeys);
 }

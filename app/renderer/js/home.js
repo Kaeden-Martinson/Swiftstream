@@ -145,6 +145,7 @@ function hostCard(host, index) {
     'separator',
     { label: 'Edit server…', icon: 'pencil', run: () => openEditor(host.name) },
     { label: 'Restart Swiftstream', icon: 'refresh', disabled: !host.ssh, run: () => restartServer(host.name) },
+    { label: 'Authorized computers…', icon: 'pc', run: () => showComputers(host.name) },
     { label: host.ssh ? 'Copy SSH login' : 'Copy address', icon: 'copy', run: () => (api.copy(host.ssh || host.address), toast('Copied')) },
     ...actionMenuItems('server', { host: host.name }),
     'separator',
@@ -295,3 +296,59 @@ addForm.addEventListener('submit', async (e) => {
 
 $('add-cancel').addEventListener('click', () => $('add-dialog').close());
 for (const id of ['new-host', 'empty-add']) $(id).addEventListener('click', () => openAddDialog());
+
+// ---------- authorized computers ----------
+
+async function showComputers(name) {
+  $('computers-title').textContent = `Computers that can log in to ${name}`;
+  $('computer-list').replaceChildren(el('div', { className: 'muted small', textContent: 'Loading…' }));
+  if (!$('computers-dialog').open) $('computers-dialog').showModal();
+  let keys;
+  try {
+    keys = await call(api.hosts.computers(name));
+  } catch (err) {
+    $('computer-list').replaceChildren(el('div', { className: 'form-error', textContent: err.message }));
+    return;
+  }
+  if (keys === null) {
+    // Servers before 0.1.2 can't list computers: updating is a redeploy, same as Restart Swiftstream.
+    const update = el('button', { type: 'button', className: 'btn btn-small', textContent: 'Update server' });
+    update.addEventListener('click', async () => {
+      $('computers-dialog').close();
+      await restartServer(name);
+    });
+    $('computer-list').replaceChildren(el('div', { className: 'computer-old' }, el('span', { textContent: `${name} runs an older Swiftstream that can't list computers.` }), update));
+    return;
+  }
+  $('computer-list').replaceChildren(
+    ...keys.map((k) => {
+      const remove = el('button', { type: 'button', className: 'btn btn-small btn-danger-quiet', textContent: 'Remove', disabled: keys.length === 1, title: keys.length === 1 ? "The only computer that can log in can't be removed" : '' });
+      remove.addEventListener('click', async () => {
+        const who = k.label || 'this unnamed computer';
+        const text = k.current
+          ? `This is the computer you're using. Afterwards it can only reach ${name} again by setting it up over SSH.`
+          : `${who} won't be able to log in to ${name} any more. Its open terminals and transfers there end now.`;
+        if (!(await confirmDialog(`Remove ${who}?`, text, 'Remove', true))) return;
+        try {
+          await call(api.hosts.revoke(name, k.fingerprint));
+          toast(`${who} can no longer log in to ${name}`);
+        } catch (err) {
+          toast(err.message);
+        }
+        showComputers(name);
+      });
+      return el(
+        'div',
+        { className: 'computer-row' },
+        el('span', { className: 'computer-icon' }, icon('pc')),
+        el(
+          'span',
+          { className: 'computer-meta' },
+          el('span', { className: 'computer-name' }, k.label || 'Unnamed computer', ...(k.current ? [el('span', { className: 'badge', textContent: 'This computer' })] : [])),
+          el('span', { className: 'computer-fp mono', textContent: k.fingerprint }),
+        ),
+        remove,
+      );
+    }),
+  );
+}

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { ensureDir, paths, readJson, writeJson } from './config.js';
-import { authMessage, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, verify } from './keys.js';
+import { authMessage, authorizedKeyEntries, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, removeAuthorizedKey, verify } from './keys.js';
 import { loadOrCreateServerCert } from './tls.js';
 import { decodeBundle, encodeBundle } from './bundle.js';
 import { hashFile, safeJoin, sameMtime, walk, writeFileAtomic } from './util.js';
@@ -206,6 +206,28 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       uploads.delete(id);
       log('upload complete', state.dest, state.size);
       return { path: state.dest, size: state.size, sha256: actual };
+    },
+
+    // The computers allowed to log in. "current" marks the one asking.
+    'GET /v1/keys': async (req) => {
+      const session = authenticate(req);
+      return { keys: authorizedKeyEntries().map(({ key, fingerprint, label }) => ({ fingerprint, label, current: key === session.key })) };
+    },
+
+    // Revoke a computer: its key is removed and its open sessions end now.
+    'POST /v1/keys/revoke': async (req) => {
+      authenticate(req);
+      const { fingerprint } = await readJsonBody(req);
+      if (!/^SHA256:[A-Za-z0-9+/]{43}$/.test(String(fingerprint || ''))) throw new HttpError(400, 'bad fingerprint');
+      const entries = authorizedKeyEntries();
+      const target = entries.find((e) => e.fingerprint === fingerprint);
+      if (!target) throw new HttpError(404, 'no such key');
+      if (entries.length === 1) throw new HttpError(409, "that's the only computer allowed to log in; add another before removing it");
+      removeAuthorizedKey(fingerprint);
+      for (const [token, s] of sessions) if (s.key === target.key) sessions.delete(token);
+      for (const ws of wss.clients) if (ws.swiftKey === target.key) ws.close(4401, 'key revoked');
+      log('key revoked', fingerprint);
+      return { ok: true };
     },
 
     // A canceled upload: drop its partial file now instead of waiting for the weekly cleanup.
@@ -411,14 +433,18 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'https://localhost');
+    let session;
     try {
       if (url.pathname !== '/v1/shell') throw new HttpError(404, 'not found');
-      authenticate(req);
+      session = authenticate(req);
     } catch (err) {
       socket.end(`HTTP/1.1 ${err.status || 400} ${err.message}\r\n\r\n`);
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => runShell(ws, url, { root, pty }));
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.swiftKey = session.key; // so revoking a key also closes its shells
+      runShell(ws, url, { root, pty });
+    });
   });
 
   // Expire stale challenges/sessions/rate-limit windows so memory doesn't grow forever.

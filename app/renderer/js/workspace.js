@@ -55,6 +55,7 @@ function renderTabs() {
         'separator',
         { label: 'Edit server…', icon: 'pencil', run: () => openEditor(session.host) },
         { label: 'Restart Swiftstream', icon: 'refresh', disabled: !hostByName(session.host)?.ssh, run: () => restartServer(session.host) },
+        { label: 'Authorized computers…', icon: 'pc', run: () => showComputers(session.host) },
         'separator',
         { label: 'Close tab', icon: 'x', hint: 'Ctrl+W', run: () => closeTab(id) },
         { label: 'Close other tabs', disabled: state.tabs.length < 2, run: () => state.tabs.filter((t) => t !== id).forEach(closeTab) },

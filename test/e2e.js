@@ -195,6 +195,23 @@ try {
   assert.match(denied.err, /isn't authorized/);
   console.log('ok  unauthorized key rejected');
 
+  // Authorized computers: list them, revoke one by name; the last one can't be removed.
+  const strangerKey = ok(strangerHome, 'key').trim().split('\n').find((l) => l.startsWith('swiftstream-ed25519'));
+  ok(serverHome, 'authorize', `${strangerKey} stranger@laptop`);
+  assert.match(ok(strangerHome, 'exec', 'local', '--', 'echo', 'let-in'), /let-in/);
+  let listed = ok(clientHome, 'computers', 'local');
+  assert.match(listed, /stranger@laptop\s+SHA256:\S+/);
+  assert.match(listed, /\(no name\)\s+SHA256:\S+\s+this computer/); // authorized by hand above, without a name
+  ok(clientHome, 'revoke', 'local', 'stranger@laptop', '--yes');
+  const revoked = run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');
+  assert.notEqual(revoked.code, 0);
+  assert.match(revoked.err, /isn't authorized/);
+  const ownFingerprint = ok(clientHome, 'computers', 'local').match(/SHA256:\S+/)[0];
+  const last = run(clientHome, 'revoke', 'local', ownFingerprint.slice(7, 20), '--yes');
+  assert.notEqual(last.code, 0);
+  assert.match(last.err + last.out, /only computer allowed to log in/);
+  console.log('ok  computers listed, one revoked, the last one kept');
+
   // Repeated failed logins from one address get rate limited (429), even with a valid key afterwards.
   for (let i = 0; i < 10; i++) run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');
   const limited = run(strangerHome, 'exec', 'local', '--', 'echo', 'nope');

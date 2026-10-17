@@ -6,7 +6,7 @@ import path from 'node:path';
 import ssh2 from 'ssh2';
 import { DEFAULT_PORT, paths, readJson, writeJson } from './config.js';
 import { UserError } from './errors.js';
-import { sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
+import { computerLabel, sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
 import { loadServerBundle } from './self.js';
 
 const { Client, utils } = ssh2;
@@ -77,7 +77,7 @@ export async function deployOverSsh({
     }
 
     onStep('Starting Swiftstream');
-    const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey}"`));
+    const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey} ${computerLabel()}"`));
     const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
     if (!line) {
       throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');

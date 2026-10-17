@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('swift', {
   },
   copy: (text) => call('clipboard:write', text),
   readClipboard: () => call('clipboard:read'),
+  diagnostics: { summary: () => call('diag:summary'), openLogs: () => call('diag:openLogs') },
   onAsk: on('ask'),
   answer: (id, value) => ipcRenderer.send('ask:answer', id, value),
   state: { get: () => call('state:get'), set: (patch) => call('state:set', patch) },

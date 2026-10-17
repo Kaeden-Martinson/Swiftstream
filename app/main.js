@@ -17,8 +17,14 @@ import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js
 import { walk } from './core/util.js';
 import { VERSION, isOlderVersion } from './core/version.js';
 import { readSshConfig, sshTarget } from './core/sshconfig.js';
+import { createLog } from './log.js';
 
 const dirname = import.meta.dirname;
+// In Swiftstream's data folder (~/.swiftstream/logs), beside the servers and keys it describes.
+const log = createLog(() => path.join(paths.dir, 'logs'));
+// Crashes and stray promise rejections go in the log; Electron still handles them as usual.
+process.on('uncaughtExceptionMonitor', (err) => log.error('uncaught exception', err?.stack || String(err)));
+process.on('unhandledRejection', (reason) => log.error('unhandled rejection', reason?.stack || String(reason)));
 let win = null;
 
 // Windows groups and pins taskbar buttons by this ID. It matches build.appId in package.json, which the
@@ -78,6 +84,7 @@ function handle(channel, fn) {
     try {
       return { ok: true, value: await fn(...args) };
     } catch (err) {
+      log.warn(`${channel} failed`, { message: err.message, code: err.code, status: err.status });
       return { ok: false, error: explainForApp(err, typeof args[0] === 'string' ? args[0] : args[0]?.name) };
     }
   });
@@ -190,7 +197,11 @@ handle('hosts:remove', (name) => {
   removeHost(name);
 });
 
-handle('hosts:info', (name) => withClient(name, (c) => c.request('GET', '/v1/info')));
+handle('hosts:info', async (name) => {
+  const info = await withClient(name, (c) => c.request('GET', '/v1/info'));
+  noteHealth(name, 'up', { version: info?.version });
+  return info;
+});
 // The computers allowed to log in to a server, and revoking one (servers from 0.1.2 on).
 handle('hosts:computers', async (name) => {
   try {
@@ -362,6 +373,7 @@ async function runJob(job, controller = new AbortController()) {
   job.state = controller.signal.aborted ? 'canceling' : 'running';
   job.error = null;
   publish(job);
+  log.info(`transfer ${job.state}`, { id: job.id, host: job.name, direction: job.direction, label: job.label, bytes: job.total });
   const meter = jobMeter(job);
   try {
     job.revealPath = await withClient(job.name, (c) => job.run(c, meter, controller.signal));
@@ -380,6 +392,7 @@ async function runJob(job, controller = new AbortController()) {
     job.finishedAt = Date.now();
     remember(job);
   }
+  log[job.state === 'failed' ? 'warn' : 'info'](`transfer ${job.state}`, { id: job.id, host: job.name, done: job.done, error: job.error?.message });
   publish(job);
 }
 
@@ -564,16 +577,25 @@ const settings = () => ({ ...DEFAULT_SETTINGS, ...(loadState().settings || {}) }
 const healing = new Map(); // name -> { busy, last }
 const HEAL_COOLDOWN_MS = 120_000;
 
+const lastHealth = new Map(); // name -> 'up' | 'down', to log changes rather than every check
+function noteHealth(name, status, details) {
+  if (lastHealth.get(name) === status) return;
+  lastHealth.set(name, status);
+  log[status === 'up' ? 'info' : 'warn'](`server ${name} ${status}`, details);
+}
+
 async function checkHealth(name) {
   try {
     const info = await withClient(name, (c) => c.request('GET', '/v1/info', { timeout: 8000 }));
     send('health', { name, status: 'up', info });
+    noteHealth(name, 'up', { version: info?.version });
     maybeUpdateServer(name, info);
     return true;
   } catch (err) {
     const host = loadHosts()[name];
     const stopped = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message);
     send('health', { name, status: 'down', error: explainForApp(err, name) });
+    noteHealth(name, 'down', { message: err.message, code: err.code });
     if (stopped && host?.ssh && settings().autoHeal) heal(name);
     return false;
   }
@@ -605,6 +627,7 @@ async function redeployUnattended(name, { cooldown, statuses: [busy, done, faile
   st.last = Date.now();
   healing.set(name, st);
   send('health', { name, status: busy, ...extra });
+  log.info(`server ${name} ${busy}`, extra);
   try {
     const host = loadHosts()[name];
     dropClient(name);
@@ -617,8 +640,10 @@ async function redeployUnattended(name, { cooldown, statuses: [busy, done, faile
       confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
     });
     send('health', { name, status: done, info, ...extra });
+    log.info(`server ${name} ${done}`, { version: info?.version });
   } catch (err) {
     send('health', { name, status: failed, error: explainForApp(err, name), ...extra });
+    log.warn(`server ${name} ${failed}`, { message: err.message, code: err.code });
   } finally {
     st.busy = false;
   }
@@ -694,6 +719,12 @@ function createWindow() {
     },
   });
   setTaskbarDetails();
+  win.webContents.on('render-process-gone', (_e, details) => log.error('window crashed', details));
+  win.webContents.on('console-message', (e, ...legacy) => {
+    // Electron passes an event with the details; older versions passed (level, message, line, source).
+    const level = e.level ?? legacy[0];
+    if (level === 'error' || level === 3) log.error('page error', { message: e.message ?? legacy[1], source: e.sourceId ?? legacy[3], line: e.lineNumber ?? legacy[2] });
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -767,8 +798,14 @@ function setUpUpdates() {
   autoUpdater.on('update-available', (info) => setUpdateState({ state: 'downloading', version: info.version, percent: 0 }));
   autoUpdater.on('update-not-available', () => setUpdateState({ state: 'current' }));
   autoUpdater.on('download-progress', (p) => setUpdateState({ state: 'downloading', percent: Math.round(p.percent) }));
-  autoUpdater.on('update-downloaded', (info) => setUpdateState({ state: 'ready', version: info.version }));
-  autoUpdater.on('error', (err) => setUpdateState({ state: updateState.state === 'checking' ? 'idle' : 'error', error: err.message }));
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('update downloaded', info.version);
+    setUpdateState({ state: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', (err) => {
+    log.warn('update check failed', err.message);
+    setUpdateState({ state: updateState.state === 'checking' ? 'idle' : 'error', error: err.message });
+  });
   const auto = () => settings().autoUpdate !== false && checkForUpdates();
   setTimeout(auto, 10_000);
   setInterval(auto, UPDATE_CHECK_MS).unref();
@@ -792,8 +829,41 @@ app.on('second-instance', () => {
   win.focus();
 });
 
+// ---- diagnostics: the log, and a summary to paste into a bug report -------------
+
+handle('diag:openLogs', () => shell.openPath(log.dir()));
+handle('diag:summary', async () => {
+  const hosts = loadHosts();
+  const lines = await Promise.all(
+    Object.entries(hosts).map(async ([name, h]) => {
+      let server = '';
+      try {
+        const info = await withClient(name, (c) => c.request('GET', '/v1/info', { timeout: 5000 }));
+        server = `up, Swiftstream ${info.version} on ${info.platform}${info.pty ? '' : ', basic terminal'}`;
+      } catch (err) {
+        server = `not reachable (${err.code || err.message})`;
+      }
+      return `  ${name}: ${new URL(h.url).host}${h.ssh ? ` (SSH ${h.ssh})` : ''}, ${server}`;
+    }),
+  );
+  const s = settings();
+  return [
+    'Swiftstream diagnostics',
+    `App ${app.getVersion()} (Electron ${process.versions.electron}, Chrome ${process.versions.chrome}, Node ${process.versions.node})`,
+    `System ${os.type()} ${os.release()} ${process.arch}, ${app.getLocale()}`,
+    `Installed ${app.isPackaged ? 'from the installer' : 'from source'}; updates ${updateState.state}`,
+    `Settings: theme ${s.theme || 'system'}, auto-restart ${s.autoHeal}, keep servers updated ${s.updateServers}, check every ${s.healthInterval}s`,
+    `Servers (${lines.length}):`,
+    ...(lines.length ? lines : ['  none']),
+    '',
+    'Recent log:',
+    ...log.tail(120).map((l) => `  ${l}`),
+  ].join('\n');
+});
+
 app.whenReady().then(() => {
   if (!firstInstance) return;
+  log.info('Swiftstream started', { version: app.getVersion(), electron: process.versions.electron, system: `${os.type()} ${os.release()} ${process.arch}`, packaged: app.isPackaged });
   applyTheme();
   createWindow();
   setUpUpdates();

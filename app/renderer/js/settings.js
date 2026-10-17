@@ -147,6 +147,22 @@ $('set-show-key').addEventListener('click', async () => {
 });
 $('tab-settings').addEventListener('click', () => activate(SETTINGS_PAGE));
 
+// Help: diagnostics for bug reports
+$('diag-copy').addEventListener('click', async () => {
+  const button = $('diag-copy');
+  button.disabled = true;
+  try {
+    await call(api.copy(await call(api.diagnostics.summary())));
+    toast('Diagnostics copied. Paste them into your bug report.');
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+$('diag-logs').addEventListener('click', () => call(api.diagnostics.openLogs()).catch((err) => toast(err.message)));
+$('diag-report').addEventListener('click', () => window.open('https://github.com/Kaeden-Martinson/Swiftstream/issues/new', '_blank'));
+
 // Close settings: back to the tab (or the servers page) you came from.
 function closeSettings() {
   const back = state.returnTo;

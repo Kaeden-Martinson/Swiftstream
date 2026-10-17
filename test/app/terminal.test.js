@@ -10,10 +10,12 @@ try {
     openSession('box', 'terminal');
     const session = await until(() => activeSession()?.panes?.[0]?.id && activeSession());
     const first = session.panes[0];
-    await until(() => !first.container.classList.contains('connecting'));
+    // Type only once the shell shows its prompt (slow machines, like CI, take a while to start one).
+    const prompted = (pane) => /[>$#]\\s*$/.test(text(pane).trimEnd() + ' ');
+    await until(() => !first.container.classList.contains('connecting') && prompted(first), 60000);
     await sleep(500);
     api.term.write(first.id, 'echo needle-one\\r\\necho hay\\r\\necho needle-two\\r\\n');
-    await until(() => (text(first).match(/needle-two/g) || []).length >= 2);
+    await until(() => (text(first).match(/needle-two/g) || []).length >= 2, 60000);
 
     // Search
     openSearch();
@@ -27,10 +29,10 @@ try {
     // Split: a second shell in the same tab
     splitPane(session);
     const second = await until(() => session.panes[1]?.id && session.panes[1]);
-    await until(() => !second.container.classList.contains('connecting'));
+    await until(() => !second.container.classList.contains('connecting') && prompted(second), 60000);
     await sleep(500);
     api.term.write(second.id, 'echo from-second-pane\\r\\n');
-    await until(() => (text(second).match(/from-second-pane/g) || []).length >= 2);
+    await until(() => (text(second).match(/from-second-pane/g) || []).length >= 2, 60000);
     const focusedIsSecond = session.term === second;
     const bothVisible = session.panes.map((p) => Math.round(p.container.getBoundingClientRect().width));
 

@@ -34,6 +34,11 @@ for (const file of tests) {
     child.stderr.on('data', (d) => (out += d));
     child.on('close', (c) => {
       if (c !== 0) console.log(out.trim().split('\n').map((l) => `    ${l}`).join('\n'));
+      // On GitHub Actions, also as an annotation: those can be read without signing in.
+      if (c !== 0 && process.env.GITHUB_ACTIONS) {
+        const text = out.trim().split('\n').filter((l) => !/^\s+at /.test(l)).slice(-25).join('\n');
+        console.log(`::error title=App test ${file} failed::${text.replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A')}`);
+      }
       resolve(c);
     });
   });

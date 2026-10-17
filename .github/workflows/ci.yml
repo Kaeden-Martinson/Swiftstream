@@ -80,5 +80,12 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix app
       - name: Build the app and command line for this system (not published)
-        run: npm run release
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! npm run release 2>&1 | tee build.log; then
+            # As an annotation too: readable without signing in.
+            echo "::error title=Package build failed on $RUNNER_OS::$(grep -v '^ *at ' build.log | tail -30 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          fi
       - run: ls -la site/downloads

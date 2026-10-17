@@ -278,14 +278,47 @@ handle('clipboard:write', (text) => clipboard.writeText(text));
 
 // ---- transfers --------------------------------------------------------------
 
+// A job is one upload or download the user started. It can be paused (its partial files stay, so
+// resuming continues), canceled (partial files are removed), and retried after it fails or is canceled.
+// Finished jobs are kept in a short history (transfers.json) for the Recent transfers list.
+const jobs = new Map(); // id -> job, for this run of the app
+const HISTORY_FILE = path.join(paths.dir, 'transfers.json');
+const HISTORY_MAX = 50;
+let history = readJson(HISTORY_FILE, []);
+
+const ENDED = ['done', 'failed', 'canceled'];
+function snapshot(job) {
+  return {
+    id: job.id,
+    host: job.name,
+    label: job.label,
+    direction: job.direction,
+    total: job.total,
+    done: job.done,
+    state: job.state, // running | paused | canceling | done | failed | canceled
+    error: job.error || null,
+    revealPath: job.revealPath || null,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt || null,
+    canRetry: job.state === 'failed' || job.state === 'canceled',
+  };
+}
+const publish = (job) => send('transfer:update', snapshot(job));
+
+function remember(job) {
+  const { canRetry: _retry, ...entry } = snapshot(job);
+  history = [entry, ...history.filter((h) => h.id !== job.id)].slice(0, HISTORY_MAX);
+  writeJson(HISTORY_FILE, history);
+}
+
 /** Progress meter compatible with core/transfer.js that reports to the window (throttled). */
-function jobMeter(id, total) {
-  let done = 0;
+function jobMeter(job) {
+  job.done = 0;
   let last = 0;
-  const report = () => send('transfer:progress', { id, done, total });
+  const report = () => send('transfer:progress', { id: job.id, done: job.done, total: job.total });
   return {
     add(n) {
-      done += n;
+      job.done += n;
       if (Date.now() - last > 120) {
         last = Date.now();
         report();
@@ -296,21 +329,77 @@ function jobMeter(id, total) {
   };
 }
 
-function startJob({ name, label, direction, total, run }) {
-  const id = nextId++;
-  send('transfer:start', { id, host: name, label, direction, total });
-  (async () => {
-    try {
-      const meter = jobMeter(id, total);
-      const revealPath = await withClient(name, (c) => run(c, meter));
-      meter.finish();
-      send('transfer:done', { id, revealPath });
-    } catch (err) {
-      send('transfer:done', { id, error: explainForApp(err, name) });
+/** Run (or resume) a job. A controller that's already canceled just cleans up an earlier run's files. */
+async function runJob(job, controller = new AbortController()) {
+  job.controller = controller;
+  job.state = controller.signal.aborted ? 'canceling' : 'running';
+  job.error = null;
+  publish(job);
+  const meter = jobMeter(job);
+  try {
+    job.revealPath = await withClient(job.name, (c) => job.run(c, meter, controller.signal));
+    meter.finish();
+    job.state = 'done';
+  } catch (err) {
+    const reason = controller.signal.aborted ? controller.signal.reason : null;
+    if (reason === 'pause') job.state = 'paused';
+    else if (reason === 'cancel') job.state = 'canceled';
+    else {
+      job.state = 'failed';
+      job.error = explainForApp(err, job.name);
     }
-  })();
-  return id;
+  }
+  if (ENDED.includes(job.state)) {
+    job.finishedAt = Date.now();
+    remember(job);
+  }
+  publish(job);
 }
+
+function startJob({ name, label, direction, total, run }) {
+  const job = { id: `${Date.now().toString(36)}-${nextId++}`, name, label, direction, total, run, done: 0, startedAt: Date.now() };
+  jobs.set(job.id, job);
+  runJob(job);
+  return job.id;
+}
+
+handle('transfer:pause', (id) => {
+  const job = jobs.get(id);
+  if (job?.state === 'running') job.controller.abort('pause');
+});
+handle('transfer:resume', (id) => {
+  const job = jobs.get(id);
+  if (job?.state === 'paused') runJob(job);
+});
+handle('transfer:cancel', (id) => {
+  const job = jobs.get(id);
+  if (job?.state === 'running') job.controller.abort('cancel');
+  else if (job?.state === 'paused') {
+    const controller = new AbortController();
+    controller.abort('cancel');
+    runJob(job, controller); // removes what the paused run left behind
+  }
+});
+// Retry starts over from what's already there: completed files are skipped, partial ones resume.
+handle('transfer:retry', (id) => {
+  const job = jobs.get(id);
+  if (job?.state === 'failed' || job?.state === 'canceled') {
+    job.finishedAt = null;
+    runJob(job);
+  }
+});
+handle('transfer:list', () => {
+  const live = [...jobs.values()].map(snapshot);
+  const liveIds = new Set(live.map((j) => j.id));
+  return [...live.filter((j) => !ENDED.includes(j.state)), ...history.filter((h) => !liveIds.has(h.id)).map((h) => ({ ...h, canRetry: false })), ...live.filter((j) => ENDED.includes(j.state))]
+    .sort((a, b) => (b.finishedAt || Infinity) - (a.finishedAt || Infinity) || b.startedAt - a.startedAt)
+    .slice(0, HISTORY_MAX);
+});
+handle('transfer:clear', () => {
+  history = [];
+  writeJson(HISTORY_FILE, history);
+  for (const [id, job] of jobs) if (ENDED.includes(job.state)) jobs.delete(id);
+});
 
 const sizeOf = (files) => files.reduce((sum, f) => sum + f.size, 0);
 const describe = (names) => (names.length === 1 ? names[0] : `${names.length} items`);
@@ -327,10 +416,10 @@ handle('transfer:upload', async (name, localPaths, remoteDir) => {
     direction: 'up',
     label: describe(items.map((i) => path.basename(i.path))),
     total: sizeOf(items),
-    run: async (client, meter) => {
+    run: async (client, meter, signal) => {
       for (const item of items) {
-        if (item.isDirectory) await pushDir(client, item.path, `${remoteDir}/${path.basename(item.path)}`, { meter });
-        else await push(client, item.path, `${remoteDir}/`, { meter });
+        if (item.isDirectory) await pushDir(client, item.path, `${remoteDir}/${path.basename(item.path)}`, { meter, signal });
+        else await push(client, item.path, `${remoteDir}/`, { meter, signal });
       }
     },
   });
@@ -361,10 +450,10 @@ handle('transfer:download', async (name, remoteItems, targetDir) => {
     direction: 'down',
     label: describe(remoteItems.map((i) => i.name)),
     total,
-    run: async (client, meter) => {
+    run: async (client, meter, signal) => {
       for (const item of remoteItems) {
-        if (item.isDirectory) await pullDir(client, item.path, path.join(localDir, remoteBasename(item.path)), { meter });
-        else await pull(client, item.path, localDir, { meter });
+        if (item.isDirectory) await pullDir(client, item.path, path.join(localDir, remoteBasename(item.path)), { meter, signal });
+        else await pull(client, item.path, localDir, { meter, signal });
       }
       return path.join(localDir, remoteBasename(remoteItems[0].path));
     },
@@ -573,6 +662,8 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Screenshot runs during development: keep painting even when the window is in the background.
+      backgroundThrottling: app.isPackaged || !process.env.SWIFTSTREAM_SHOT,
     },
   });
   setTaskbarDetails();
@@ -592,6 +683,12 @@ function createWindow() {
   // If the script returns { input: [...] }, those are sent as real mouse events (sendInputEvent, plus
   // { wait: ms } pauses), then SWIFTSTREAM_SHOT_AFTER (a script) runs and its result is printed.
   if (!app.isPackaged && process.env.SWIFTSTREAM_SHOT) {
+    // Mid-script screenshots: api.devShot(name) saves <SWIFTSTREAM_SHOT_DIR>/<name>.png.
+    ipcMain.handle('dev:shot', async (_e, name) => {
+      const dir = process.env.SWIFTSTREAM_SHOT_DIR || path.dirname(process.env.SWIFTSTREAM_SHOT);
+      fs.writeFileSync(path.join(dir, `${String(name).replace(/[^\w-]/g, '')}.png`), (await win.webContents.capturePage()).toPNG());
+      return { ok: true };
+    });
     win.webContents.once('did-finish-load', async () => {
       await sleep(600);
       if (process.env.SWIFTSTREAM_SHOT_JS) {

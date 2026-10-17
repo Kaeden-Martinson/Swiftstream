@@ -39,9 +39,14 @@ contextBridge.exposeInMainWorld('swift', {
   transfers: {
     upload: (name, localPaths, remoteDir) => call('transfer:upload', name, localPaths, remoteDir),
     download: (name, items, targetDir) => call('transfer:download', name, items, targetDir),
-    onStart: on('transfer:start'),
+    pause: (id) => call('transfer:pause', id),
+    resume: (id) => call('transfer:resume', id),
+    cancel: (id) => call('transfer:cancel', id),
+    retry: (id) => call('transfer:retry', id),
+    list: () => call('transfer:list'),
+    clear: () => call('transfer:clear'),
+    onUpdate: on('transfer:update'),
     onProgress: on('transfer:progress'),
-    onDone: on('transfer:done'),
   },
   term: {
     open: (name, cols, rows) => call('term:open', name, cols, rows),
@@ -56,6 +61,7 @@ contextBridge.exposeInMainWorld('swift', {
   copy: (text) => call('clipboard:write', text),
   state: { get: () => call('state:get'), set: (patch) => call('state:set', patch) },
   onNav: on('nav'),
+  devShot: (name) => call('dev:shot', name), // development screenshot runs only (see main.js)
   edit: { open: (name, remotePath, appId) => call('edit:open', name, remotePath, appId), apps: () => call('edit:apps'), onEvent: on('edit') },
   health: { check: (name) => call('health:check', name), heal: (name) => call('health:heal', name), onEvent: on('health') },
   updates: { state: () => call('update:state'), check: () => call('update:check'), install: () => call('update:install'), onState: on('update') },

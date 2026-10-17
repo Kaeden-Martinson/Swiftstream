@@ -112,3 +112,15 @@ export function progressMeter(label, total) {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The error a paused or canceled transfer stops with (signal.reason is 'pause' or 'cancel'). */
+export function abortError(signal) {
+  const err = new Error(signal?.reason === 'cancel' ? 'Transfer canceled' : 'Transfer paused');
+  err.name = 'AbortError';
+  err.reason = signal?.reason;
+  return err;
+}
+
+export function checkAbort(signal) {
+  if (signal?.aborted) throw abortError(signal);
+}

@@ -208,6 +208,19 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       return { path: state.dest, size: state.size, sha256: actual };
     },
 
+    // A canceled upload: drop its partial file now instead of waiting for the weekly cleanup.
+    'POST /v1/upload/abort': async (req, url) => {
+      authenticate(req);
+      const id = url.searchParams.get('id');
+      if (!/^[a-f0-9]{32}$/.test(id || '')) throw new HttpError(400, 'bad id');
+      const statePath = path.join(paths.uploads, `${id}.json`);
+      const state = uploads.get(id) || readJson(statePath, null);
+      if (state) await fsp.rm(state.partPath, { force: true });
+      await fsp.rm(statePath, { force: true });
+      uploads.delete(id);
+      return { ok: true };
+    },
+
     'PUT /v1/upload/chunk': async (req, url) => {
       authenticate(req);
       const id = url.searchParams.get('id');

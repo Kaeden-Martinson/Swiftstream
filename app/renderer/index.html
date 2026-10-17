@@ -10,6 +10,8 @@
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-transfers" viewBox="0 0 24 24"><path d="M8 19V5M4.5 8.5L8 5l3.5 3.5M16 5v14M12.5 15.5L16 19l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-arrow-up-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 16V8.5M8.5 11.5L12 8l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-prompt" viewBox="0 0 24 24"><path d="M4.5 6.5L10 12l-5.5 5.5M12.5 17.5h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" fill="currentColor"/></symbol>
@@ -50,6 +52,7 @@
       <div class="open-tabs" id="open-tabs" role="tablist" aria-label="Open servers"></div>
       <button class="icon-btn tab-new" id="tab-new" type="button" title="New terminal or file browser (Ctrl+T)" aria-label="New tab"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
       <span class="tabbar-gap"></span>
+      <button class="hometab transfers-tab" id="transfers-btn" type="button" title="Recent transfers" aria-label="Transfers"><svg aria-hidden="true"><use href="#i-transfers"/></svg><span class="tcount" id="transfers-count" hidden>0</span></button>
       <button class="update-btn" id="update-btn" type="button" hidden title="A new version is downloaded. Restart Swiftstream to install it."><svg aria-hidden="true"><use href="#i-arrow-up-circle"/></svg><span>Restart to update</span></button>
       <button class="hometab settings-tab" id="tab-settings" type="button"><svg aria-hidden="true"><use href="#i-gear"/></svg>Settings</button>
     </header>
@@ -229,6 +232,10 @@
   </div>
 
   <div class="transfers" id="transfers" aria-live="polite"></div>
+  <div class="transfers-panel" id="transfers-panel" hidden>
+    <div class="tp-head"><b>Transfers</b><button class="btn btn-quiet btn-small" id="transfers-clear" type="button">Clear finished</button></div>
+    <div class="tp-list" id="transfers-list"></div>
+  </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <!-- Add a server -->

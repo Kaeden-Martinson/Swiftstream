@@ -436,3 +436,36 @@ option { background: var(--panel); color: var(--text); }
 .import-card { cursor: default; border-style: dashed; }
 .import-card .host-avatar { color: var(--muted); background: var(--panel-2); }
 .import-card .btn { margin-left: auto; align-self: center; }
+
+/* Transfer cards: pause / resume / cancel */
+.job-actions { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.job-action { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.job-action svg { width: 13px; height: 13px; }
+.job-action:hover { background: var(--panel-3); color: var(--text); }
+.job-action.danger:hover { color: var(--danger); }
+.job.paused .job-bar > div { background: var(--warn); }
+.job.paused .job-dir { color: var(--warn); }
+.job.canceled { opacity: .8; }
+.job.canceled .job-dir { color: var(--muted); }
+.job.canceled .job-bar > div { background: var(--faint); }
+
+/* Tab bar: Transfers button with a count, and its list */
+.transfers-tab { position: relative; padding: 0 10px; }
+.transfers-tab svg { color: var(--muted) !important; }
+.transfers-tab.active svg, .transfers-tab:hover svg { color: var(--text) !important; }
+.tcount { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; }
+.tcount.paused { background: var(--warn); }
+.tcount[hidden] { display: none; }
+.transfers-panel { position: fixed; top: 50px; right: 16px; width: 380px; max-height: min(480px, calc(100vh - 80px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 16px 40px var(--shadow-strong); z-index: 40; animation: menu-in .14s var(--ease) both; }
+.transfers-panel[hidden] { display: none; }
+.tp-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 8px 14px; border-bottom: 1px solid var(--line); }
+.tp-list { overflow: auto; padding: 4px 0; }
+.tp-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 14px; }
+.tp-row:hover { background: var(--row-hover); }
+.tp-row.failed .job-dir { color: var(--danger); }
+.tp-row.paused .job-dir { color: var(--warn); }
+.tp-row.canceled .job-dir { color: var(--faint); }
+.tp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.tp-label { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-empty { padding: 18px 14px; font-size: 13px; }

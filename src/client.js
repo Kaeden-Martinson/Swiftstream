@@ -1,6 +1,7 @@
 import https from 'node:https';
 import { authMessage, sign } from './keys.js';
 import { pinnedTlsOptions } from './tls.js';
+import { abortError } from './util.js';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -42,8 +43,9 @@ export class SwiftClient {
   /**
    * Plain object bodies are sent as JSON; Buffers as-is.
    * With `stream: true` a successful response is returned unread.
+   * An AbortSignal (`signal`) stops the request, and a streamed response, when it fires.
    */
-  request(method, pathname, { query, body, headers = {}, stream = false, timeout = 60_000 } = {}) {
+  request(method, pathname, { query, body, headers = {}, stream = false, timeout = 60_000, signal } = {}) {
     const url = new URL(pathname, this.base);
     for (const [k, v] of Object.entries(query || {})) url.searchParams.set(k, v);
     headers = { ...headers };
@@ -56,7 +58,10 @@ export class SwiftClient {
     if (payload) headers['content-length'] = payload.length;
 
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(abortError(signal));
+      const onAbort = () => req.destroy(abortError(signal));
       const req = https.request(url, { method, headers, agent: this.agent }, (res) => {
+        res.on('close', () => signal?.removeEventListener('abort', onAbort));
         if (stream && res.statusCode < 400) return resolve(res);
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -75,7 +80,11 @@ export class SwiftClient {
           else resolve(data);
         });
       });
-      req.on('error', reject);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      req.on('error', (err) => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(signal?.aborted ? abortError(signal) : err);
+      });
       req.setTimeout(timeout, () => req.destroy(new Error(`${method} ${url.pathname} timed out`)));
       req.end(payload);
     });

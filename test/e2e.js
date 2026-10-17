@@ -70,6 +70,60 @@ try {
   assert.equal(sha(back), sha(src));
   console.log('ok  pull with parallel ranges, sha256 verified');
 
+  // Pause, resume and cancel, the way the app does them: an AbortSignal with reason 'pause' or 'cancel'.
+  process.env.SWIFTSTREAM_HOME = clientHome;
+  const { loadHosts } = await import('../src/config.js');
+  const { loadOrCreateIdentity } = await import('../src/keys.js');
+  const { connectClient } = await import('../src/client.js');
+  const { pull, push } = await import('../src/transfer.js');
+  const conn = await connectClient(loadHosts().local, loadOrCreateIdentity());
+  const MB = 1024 * 1024;
+  // A progress meter that stops the transfer once `bytes` have moved.
+  const stopAfter = (bytes, reason) => {
+    const ctl = new AbortController();
+    let moved = 0;
+    const meter = { add: (n) => (moved += n) >= bytes && !ctl.signal.aborted && ctl.abort(reason), finish() {}, stop() {} };
+    return { signal: ctl.signal, meter };
+  };
+
+  const resumed = path.join(work, 'resumed.bin');
+  await assert.rejects(pull(conn, 'uploads/big.bin', resumed, { chunkSize: MB, parallel: 2, ...stopAfter(8 * MB, 'pause') }), { name: 'AbortError' });
+  const saved = JSON.parse(fs.readFileSync(`${resumed}.swiftstream-part.json`, 'utf8')).done.length;
+  assert.ok(saved >= 6, `only ${saved} chunks saved`);
+  let resumedFrom = null;
+  await pull(conn, 'uploads/big.bin', resumed, { chunkSize: MB, meter: { add: (n) => (resumedFrom ??= n), finish() {}, stop() {} } });
+  assert.equal(sha(resumed), sha(src));
+  assert.ok(resumedFrom >= (saved - 1) * MB, `resumed from ${resumedFrom} bytes, expected about ${saved} MB`);
+  assert.ok(!fs.existsSync(`${resumed}.swiftstream-part`) && !fs.existsSync(`${resumed}.swiftstream-part.json`));
+  console.log('ok  paused download resumes from the chunks it already has');
+
+  const gone = path.join(work, 'gone.bin');
+  await assert.rejects(pull(conn, 'uploads/big.bin', gone, { chunkSize: MB, parallel: 2, ...stopAfter(4 * MB, 'cancel') }), { name: 'AbortError' });
+  assert.ok(!fs.existsSync(`${gone}.swiftstream-part`) && !fs.existsSync(`${gone}.swiftstream-part.json`) && !fs.existsSync(gone));
+  await assert.rejects(push(conn, src, 'uploads/canceled.bin', { chunkSize: MB, parallel: 2, ...stopAfter(6 * MB, 'cancel') }), { name: 'AbortError' });
+  assert.ok(!fs.existsSync(path.join(files, 'uploads', 'canceled.bin.swiftstream-part')), 'server kept the canceled upload');
+  assert.deepEqual(fs.readdirSync(path.join(serverHome, 'uploads')), []);
+  console.log('ok  canceled download and upload leave no partial files');
+
+  // Canceling a paused transfer: running it with an already-canceled signal cleans up the earlier run.
+  const canceled = () => {
+    const ctl = new AbortController();
+    ctl.abort('cancel');
+    return ctl.signal;
+  };
+  const later = path.join(work, 'later.bin');
+  await assert.rejects(pull(conn, 'uploads/big.bin', later, { chunkSize: MB, parallel: 2, ...stopAfter(4 * MB, 'pause') }), { name: 'AbortError' });
+  assert.ok(fs.existsSync(`${later}.swiftstream-part`));
+  await assert.rejects(pull(conn, 'uploads/big.bin', later, { signal: canceled() }), { name: 'AbortError' });
+  assert.ok(!fs.existsSync(`${later}.swiftstream-part`) && !fs.existsSync(`${later}.swiftstream-part.json`));
+  await assert.rejects(push(conn, src, 'uploads/later.bin', { chunkSize: MB, parallel: 2, ...stopAfter(4 * MB, 'pause') }), { name: 'AbortError' });
+  assert.ok(fs.existsSync(path.join(files, 'uploads', 'later.bin.swiftstream-part')));
+  await assert.rejects(push(conn, src, 'uploads/later.bin', { chunkSize: MB, signal: canceled() }), { name: 'AbortError' });
+  assert.ok(!fs.existsSync(path.join(files, 'uploads', 'later.bin.swiftstream-part')));
+  assert.deepEqual(fs.readdirSync(path.join(serverHome, 'uploads')), []);
+  conn.close();
+  console.log('ok  canceling a paused download or upload removes its partial files');
+
   const empty = path.join(work, 'empty.txt');
   fs.writeFileSync(empty, '');
   ok(clientHome, 'push', 'local', empty, 'empty.txt');
@@ -109,8 +163,6 @@ try {
 
   // Paths inside a bundle must not escape the target folder.
   process.env.SWIFTSTREAM_HOME = clientHome;
-  const { connectClient } = await import('../src/client.js');
-  const { loadOrCreateIdentity } = await import('../src/keys.js');
   const { getHost } = await import('../src/config.js');
   const { encodeBundle } = await import('../src/bundle.js');
   const api = await connectClient(getHost('local'), loadOrCreateIdentity());

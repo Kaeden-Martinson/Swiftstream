@@ -32,7 +32,12 @@ try {
     await until(() => !second.container.classList.contains('connecting') && prompted(second), 60000);
     await sleep(500);
     api.term.write(second.id, 'echo from-second-pane\\r\\n');
-    await until(() => (text(second).match(/from-second-pane/g) || []).length >= 2, 60000);
+    try {
+      await until(() => (text(second).match(/from-second-pane/g) || []).length >= 2, 60000);
+    } catch {
+      // Say what the second pane shows instead, for the CI annotation.
+      throw new Error(\`no output in the second pane (\${second.xterm.cols} cols, pty \${second.pty}, id \${second.id}, first id \${first.id}); it shows: \${JSON.stringify(text(second).slice(-500))}\`);
+    }
     const focusedIsSecond = session.term === second;
     const bothVisible = session.panes.map((p) => Math.round(p.container.getBoundingClientRect().width));
 

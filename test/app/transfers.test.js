@@ -35,7 +35,8 @@ try {
 
     const down = await call(api.transfers.download('box', [{ path: remote.cwd + '/big-download.bin', name: 'big-download.bin', isDirectory: false, size: 300 * 1024 * 1024 }], ${JSON.stringify(downloads)}));
     await until(() => (transferJobs.get(down)?.done || 0) > 20 * 1024 * 1024);
-    const speed = cards.get(down).status.innerText;
+    // The speed shows once there's a moment of progress to measure.
+    const speed = await until(() => /\\/s/.test(cards.get(down).status.innerText) && cards.get(down).status.innerText, 30000);
     await api.transfers.cancel(down);
     await until(() => transferJobs.get(down)?.state === 'canceled');
 

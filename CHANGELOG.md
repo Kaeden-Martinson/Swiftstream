@@ -4,6 +4,8 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-17
+
 - Installing the desktop app puts the `swiftstream` (and `sws`) command on your PATH, with no Node.js needed.
 - `swiftstream app` opens the desktop app, or brings it to the front if it's already open.
 - A pinned taskbar button keeps the Swiftstream name and logo.

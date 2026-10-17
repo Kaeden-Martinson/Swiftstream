@@ -15,5 +15,7 @@
     window.dispatchEvent(new CustomEvent('themechange', { detail: theme }));
   };
   apply(false);
+  // For CSS: macOS draws its window buttons on the left of the tab bar.
+  document.documentElement.classList.add(`platform-${window.swift?.platform || 'unknown'}`);
   light.addEventListener('change', () => apply(true));
 })();

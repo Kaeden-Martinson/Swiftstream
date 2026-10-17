@@ -9,7 +9,7 @@ There are two ways to use it: the **desktop app** (terminal and file browser) or
 
 ## Desktop app
 
-Download `Swiftstream-Setup-<version>.exe` and run it. Type an SSH login like `ubuntu@203.0.113.7` in the search bar and press **Connect**. The app logs in once, installs Swiftstream on the server and opens it in a tab. The installer also puts the `swiftstream` command on your PATH (no Node.js needed), and `swiftstream app` opens the app from any terminal.
+Download the app for Windows (`Swiftstream-Setup-<version>.exe`), macOS (`.dmg`, Apple silicon and Intel) or Linux (`.AppImage` or `.deb`) and install it. Type an SSH login like `ubuntu@203.0.113.7` in the search bar and press **Connect**. The app logs in once, installs Swiftstream on the server and opens it in a tab. On Windows, the installer also puts the `swiftstream` command on your PATH (no Node.js needed), and `swiftstream app` opens the app from any terminal. On a Mac, shortcuts use ⌘ instead of Ctrl.
 
 - **Servers home:** your servers as cards, in groups you choose, with a live status dot on each. Search by name, address, login or group. Hosts in your `~/.ssh/config` that aren't set up yet appear under **From your SSH config**, one click from set up. Right-click a card for terminal, files, edit, restart, **Authorized computers** and remove, plus any actions you've added.
 - **Tabs:** each tab is a terminal or a file browser for one server, and a server can have several of each. The **+** button (Ctrl+T) opens a new one for any server. Ctrl+Tab moves between tabs and Ctrl+W closes one. The app reopens the tabs you had open last time.
@@ -242,7 +242,7 @@ node bin/swiftstream.js add local 127.0.0.1:7022
 
 ## Roadmap
 
-1. **Signed builds** for Windows, and desktop builds for macOS and Linux.
+1. **Signed builds** for Windows and macOS (no more SmartScreen or Gatekeeper warnings, and auto-update on macOS).
 2. **Delta transfer** for large files that changed slightly (rsync-style rolling checksums), and an optional `--delete` for folder sync.
 3. **HTTP/3 / QUIC transport** for lossy links, keeping HTTPS/1.1 as the fallback.
 4. **Accounts** (Termius-style): a hosted account that syncs your host list and public keys between devices. The private key stays on each device.

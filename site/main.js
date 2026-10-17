@@ -251,6 +251,7 @@ if (details && !reduceMotion && details.animate) {
 
 // ---------- downloads: real files, sizes and checksums from downloads/latest.json ----------
 const isWindows = /win/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+const isMac = /mac/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
 const formatSize = (bytes) => {
   const mb = bytes / 1024 / 1024;
   if (mb >= 10) return `${Math.round(mb)} MB`;
@@ -261,10 +262,10 @@ function applyManifest(manifest) {
   const byKind = Object.fromEntries(manifest.files.map((f) => [f.kind, f]));
   for (const row of document.querySelectorAll('#platforms [data-kind]')) {
     const file = byKind[row.dataset.kind];
-    if (!file) {
-      row.classList.add('unavailable');
-      continue;
-    }
+    // Optional rows (the macOS and Linux apps) only show when that release has them.
+    row.hidden = row.hasAttribute('data-optional') && !file;
+    row.classList.toggle('unavailable', !file);
+    if (!file) continue;
     row.querySelector('[data-dl-link]').href = `downloads/${file.name}`;
     const meta = row.querySelector('[data-dl-meta]');
     meta.textContent = `${meta.textContent.split(' · ')[0]} · ${formatSize(file.size)}`;
@@ -274,18 +275,29 @@ function applyManifest(manifest) {
     sum.title = 'Copy the full checksum';
     sum.hidden = false;
   }
+  const deb = byKind['app-linux-deb'];
+  document.querySelector('[data-dl-deb-note]').hidden = !deb;
+  if (deb) document.querySelector('[data-dl-deb]').href = `downloads/${deb.name}`;
+  // "Not packaged yet" only while a release has neither the macOS nor the Linux app.
+  $('dl-later').hidden = !!(byKind['app-mac'] || byKind['app-linux']);
+
   const release = $('dl-release');
   release.replaceChildren(`Version ${manifest.version} · released ${manifest.released} · `, Object.assign(document.createElement('a'), { href: 'downloads/SHA256SUMS.txt', textContent: 'SHA256SUMS.txt' }));
   for (const v of document.querySelectorAll('.footer-ver')) v.textContent = `v${manifest.version}`;
 
-  // The hero button offers what fits this computer: the app on Windows, the command line elsewhere.
+  // The hero button offers what fits this computer: the desktop app if there's one for it, else the command line.
   const hero = $('hero-download');
-  const pick = isWindows ? byKind['app-windows'] : byKind['cli-portable'];
+  const system = isWindows ? 'windows' : isMac ? 'mac' : 'linux';
+  const app = byKind[`app-${system}`];
+  const pick = app || byKind['cli-portable'];
   if (pick) hero.href = `downloads/${pick.name}`;
-  if (!isWindows && pick) {
+  if (app) {
+    hero.querySelector('use').setAttribute('href', `#i-${system === 'mac' ? 'apple' : system}`);
+    hero.querySelector('span').textContent = `Download for ${{ windows: 'Windows', mac: 'macOS', linux: 'Linux' }[system]}`;
+  } else if (pick) {
     hero.querySelector('use').setAttribute('href', '#i-terminal');
     hero.querySelector('span').textContent = 'Download the command line';
-    $('hero-fine').textContent = 'The desktop app is Windows-only for now. The command line needs Node.js 18+ on this computer.';
+    $('hero-fine').textContent = 'The desktop app for this system is on its way. The command line needs Node.js 18+ on this computer.';
   }
 }
 

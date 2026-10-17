@@ -6,6 +6,8 @@ function describeUpdate(u) {
   switch (u.state) {
     case 'dev':
       return { text: 'Updates are off when running from source.', action: null };
+    case 'manual':
+      return { text: 'On macOS, new versions are downloaded from the website for now.', action: 'Get the latest' };
     case 'checking':
       return { text: 'Checking for updates…', action: null };
     case 'downloading':
@@ -34,6 +36,7 @@ function renderUpdate(u) {
 $('update-btn').addEventListener('click', () => call(api.updates.install()));
 $('update-action').addEventListener('click', () => {
   if (state.update?.state === 'ready') call(api.updates.install());
+  else if (state.update?.state === 'manual') window.open('https://github.com/Kaeden-Martinson/Swiftstream/releases/latest', '_blank');
   else call(api.updates.check());
 });
 api.updates.onState(renderUpdate);

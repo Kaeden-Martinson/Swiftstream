@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -505,7 +505,19 @@ handle('transfer:download', async (name, remoteItems, targetDir) => {
 const editRoot = path.join(app.getPath('temp'), 'Swiftstream', 'open');
 const watched = new Map(); // local path -> { host, remotePath, watcher, timer, mtime }
 
+/** Editors for "Open with": [{ id, label, path, args }] (spawned as path ...args file). */
 function findEditors() {
+  if (process.platform === 'darwin') {
+    const apps = [['vscode', 'VS Code', 'Visual Studio Code'], ['sublime', 'Sublime Text', 'Sublime Text'], ['textedit', 'TextEdit', 'TextEdit']];
+    const has = (name) => name === 'TextEdit' || ['/Applications', path.join(os.homedir(), 'Applications')].some((d) => fs.existsSync(path.join(d, `${name}.app`)));
+    return apps.filter(([, , name]) => has(name)).map(([id, label, name]) => ({ id, label, path: 'open', args: ['-a', name] }));
+  }
+  if (process.platform !== 'win32') {
+    const onPath = (cmd) => (process.env.PATH || '').split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, cmd)));
+    return [['vscode', 'VS Code', 'code'], ['sublime', 'Sublime Text', 'subl'], ['gedit', 'Text Editor', 'gedit'], ['kate', 'Kate', 'kate']]
+      .filter(([, , cmd]) => onPath(cmd))
+      .map(([id, label, cmd]) => ({ id, label, path: cmd, args: [] }));
+  }
   const editors = [];
   const local = process.env.LOCALAPPDATA || '';
   const programFiles = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
@@ -557,10 +569,10 @@ handle('edit:open', async (name, remotePath, appId = 'default') => {
   } else if (appId !== 'default') {
     const editor = findEditors().find((e) => e.id === appId);
     if (!editor) throw new Error('That app was not found on this computer.');
-    spawn(editor.path, [localPath], { detached: true, stdio: 'ignore' }).unref();
+    spawn(editor.path, [...(editor.args || []), localPath], { detached: true, stdio: 'ignore' }).unref();
   } else {
     const failure = await shell.openPath(localPath);
-    if (failure) throw new Error(`Windows couldn't open ${remoteBasename(remotePath)}: ${failure}`);
+    if (failure) throw new Error(`Couldn't open ${remoteBasename(remotePath)}: ${failure}`);
   }
   watchForSaves(localPath, name, remotePath);
   return { localPath };
@@ -792,6 +804,8 @@ function checkForUpdates({ quiet = true } = {}) {
 
 function setUpUpdates() {
   if (!app.isPackaged) return;
+  // macOS only installs updates for a signed app; until the Mac build is signed, updates are manual.
+  if (process.platform === 'darwin') return setUpdateState({ state: 'manual' });
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true; // a downloaded update also installs when you quit
   autoUpdater.on('checking-for-update', () => setUpdateState({ state: 'checking', error: null }));
@@ -863,6 +877,8 @@ handle('diag:summary', async () => {
 
 app.whenReady().then(() => {
   if (!firstInstance) return;
+  // macOS needs an app menu: without an Edit menu, Cmd+C / Cmd+V / Cmd+A don't work in text fields.
+  if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
   log.info('Swiftstream started', { version: app.getVersion(), electron: process.versions.electron, system: `${os.type()} ${os.release()} ${process.arch}`, packaged: app.isPackaged });
   applyTheme();
   createWindow();

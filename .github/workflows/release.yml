@@ -1,7 +1,8 @@
 # Release: push a tag like v0.1.2 (matching package.json) and this builds, tests and publishes everything.
-#   - GitHub Release with the installer, the standalone exe, the portable .cjs, SHA256SUMS.txt,
-#     latest.json (the website's download list) and latest.yml (the desktop app's auto-update feed)
-#   - npm package, published with provenance through npm trusted publishing (no token needed)
+#   - Windows, macOS and Linux builds of the desktop app and the standalone command line
+#   - one GitHub Release with every download, SHA256SUMS.txt, latest.json (the website's download list)
+#     and the desktop app's update feeds (latest*.yml and friends)
+#   - the npm package, published with provenance through npm trusted publishing (no token needed)
 # See docs/RELEASING.md for the one-time setup.
 name: Release
 
@@ -34,12 +35,13 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  windows:
-    name: Build downloads and create the GitHub Release
+  build:
+    name: Build (${{ matrix.os }})
     needs: check
-    runs-on: windows-latest
-    permissions:
-      contents: write
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,10 +53,48 @@ jobs:
             app/package-lock.json
       - run: npm ci
       - run: npm ci --prefix app
-      - name: Build the installer, standalone exe and portable CLI
+      - name: Build the downloads
         run: npm run release
-      - name: Release notes from CHANGELOG.md
+      - name: Collect the update feed
         shell: bash
+        run: |
+          mkdir -p feed
+          v="${GITHUB_REF_NAME#v}"
+          for f in app/release/latest*.yml app/release/*-"$v"*.blockmap app/release/Swiftstream-"$v"-mac.zip; do
+            [ -f "$f" ] && cp "$f" feed/
+          done
+          ls site/downloads feed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: |
+            site/downloads/*
+            !site/downloads/latest.json
+            !site/downloads/SHA256SUMS.txt
+            feed/*
+
+  release:
+    name: Create the GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Put every platform's downloads together
+        run: |
+          mkdir -p site/downloads feed
+          find artifacts -path '*/site/downloads/*' -type f -exec cp {} site/downloads/ \;
+          find artifacts -path '*/feed/*' -type f -exec cp {} feed/ \;
+          node scripts/release.mjs --manifest-only
+          ls -la site/downloads feed
+      - name: Release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '
@@ -62,16 +102,10 @@ jobs:
             found { print }
           ' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then echo "See the commits for this version." > notes.md; fi
-      - name: Create the GitHub Release
-        shell: bash
+      - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          files=(site/downloads/*)
-          for extra in app/release/latest.yml "app/release/Swiftstream-Setup-${GITHUB_REF_NAME#v}.exe.blockmap"; do
-            [ -f "$extra" ] && files+=("$extra")
-          done
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "Swiftstream ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" site/downloads/* feed/* --title "Swiftstream ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
 
   npm:
     name: Publish to npm

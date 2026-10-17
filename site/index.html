@@ -348,6 +348,24 @@
               </div>
               <a class="btn btn-primary btn-small" data-dl-link href="downloads/Swiftstream-Setup-0.1.0.exe" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
             </li>
+            <li data-kind="app-mac" data-optional hidden>
+              <svg aria-hidden="true"><use href="#i-apple"/></svg>
+              <div>
+                <h3>Desktop app for macOS</h3>
+                <p><span data-dl-meta>Apple silicon and Intel</span> · first time, right-click the app and choose Open</p>
+                <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
+              </div>
+              <a class="btn btn-small" data-dl-link href="#download" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            </li>
+            <li data-kind="app-linux" data-optional hidden>
+              <svg aria-hidden="true"><use href="#i-linux"/></svg>
+              <div>
+                <h3>Desktop app for Linux</h3>
+                <p><span data-dl-meta>AppImage, runs on most distributions</span><span data-dl-deb-note> · or the <a href="#download" data-dl-deb>.deb for Debian and Ubuntu</a></span></p>
+                <button class="dl-sum" type="button" data-copy="" data-dl-sum hidden></button>
+              </div>
+              <a class="btn btn-small" data-dl-link href="#download" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            </li>
             <li data-kind="cli-exe">
               <svg aria-hidden="true"><use href="#i-terminal"/></svg>
               <div>
@@ -366,7 +384,7 @@
               </div>
               <a class="btn btn-small" data-dl-link href="downloads/swiftstream-0.1.0.cjs" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
             </li>
-            <li class="dl-later">
+            <li class="dl-later" id="dl-later">
               <svg aria-hidden="true"><use href="#i-apple"/></svg>
               <div><h3>Desktop app for macOS and Linux</h3><p>Not packaged yet. Use the command line above, or build the app from source.</p></div>
               <a class="btn btn-small" href="https://github.com/Kaeden-Martinson/Swiftstream#development">Build guide</a>

@@ -15,6 +15,7 @@ What changed in each version. The release workflow copies a version's section in
 - Terminal: find (Ctrl+Shift+F), text size (Ctrl+= / Ctrl+− / Ctrl+0, also in Settings), copy on select (Settings), a right-click menu with Copy, Paste, Find, Split and Clear, and split panes: several terminals side by side in one tab (Ctrl+Shift+D, Ctrl+Shift+W closes one).
 - SSH keys with a passphrase work for setup: the app shows a dialog for it and the CLI asks at the keyboard (Enter skips to the password). Passphrases are never saved.
 - See and remove the computers allowed to log in to a server: right-click it › Authorized computers…, or `swiftstream computers` and `swiftstream revoke`. Setup now saves each computer's name (user@computer) with its key.
+- Desktop app for macOS (Apple silicon and Intel) and Linux (AppImage and .deb), with ⌘ shortcuts, Finder and Trash wording and macOS editors on a Mac. Standalone command line downloads for macOS and Linux too.
 - Settings › Help: Copy diagnostics (versions, servers and status, recent log; no passwords or keys) for bug reports, Open log folder, and Report a problem. The app keeps a small log in ~/.swiftstream/logs.
 
 ## [0.1.1] - 2026-10-16

@@ -87,6 +87,14 @@ function formatBytes(n) {
 }
 
 const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+// This computer: what things are called here, and the command key for shortcuts (Cmd on a Mac).
+const PLATFORM = api.platform;
+const IS_MAC = PLATFORM === 'darwin';
+const TRASH = PLATFORM === 'win32' ? 'Recycle Bin' : 'Trash';
+const FILE_MANAGER = { win32: 'Explorer', darwin: 'Finder' }[PLATFORM] || 'the file manager';
+const modKey = (e) => (IS_MAC ? e.metaKey : e.ctrlKey);
+const keyName = (combo) => (IS_MAC ? combo.replace(/Ctrl\+Shift\+/g, '⇧⌘').replace(/Ctrl\+/g, '⌘').replace(/Alt\+/g, '⌥') : combo);
+
 const platformName = (p) => ({ linux: 'Linux', darwin: 'macOS', win32: 'Windows', freebsd: 'FreeBSD' })[p] || p;
 
 // ---------- paths (local Windows/POSIX and remote) ----------

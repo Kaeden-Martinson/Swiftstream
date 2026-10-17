@@ -45,8 +45,14 @@ The server doesn't know this computer. Set the server up again over SSH (it auth
 **Windows says "Windows protected your PC"**
 The installer isn't code-signed yet. Choose **More info › Run anyway**. Every download's SHA-256 is listed on the download page, so you can check it with `certutil -hashfile <file> SHA256`.
 
+**macOS says the app "can't be opened" or "is damaged"**
+The Mac app isn't notarized by Apple yet. The first time, right-click Swiftstream in Applications and choose **Open**, then **Open** again. If macOS says it's damaged, run `xattr -cr /Applications/Swiftstream.app` in Terminal once.
+
+**The Linux AppImage doesn't start**
+Make it executable first (`chmod +x Swiftstream-*.AppImage`). On Ubuntu 22.04 and newer, AppImages also need FUSE 2: `sudo apt install libfuse2`. Or use the .deb instead.
+
 **The app doesn't update itself**
-Updates are off when running from source. Otherwise **Settings › Updates** shows the last check; the log (**Settings › Help › Open folder**) says why a check failed.
+Updates are off when running from source, and on macOS until the Mac build is signed (download new versions from the website there). Otherwise **Settings › Updates** shows the last check; the log (**Settings › Help › Open folder**) says why a check failed.
 
 ## FAQ
 

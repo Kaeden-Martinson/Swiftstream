@@ -9,6 +9,7 @@ const on = (channel) => (callback) => {
 };
 
 contextBridge.exposeInMainWorld('swift', {
+  platform: process.platform, // 'win32' | 'darwin' | 'linux': wording, shortcuts, window layout
   identity: () => call('identity'),
   hosts: {
     list: () => call('hosts:list'),

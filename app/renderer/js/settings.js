@@ -67,6 +67,8 @@ function actionMenuItems(scope, ctx) {
 function renderSettings() {
   const s = settings();
   for (const radio of document.querySelectorAll('#set-theme input')) radio.checked = radio.value === s.theme;
+  $('set-confirm-delete-label').textContent = `Ask before moving files to the ${TRASH}`;
+  $('set-font-hint').textContent = keyName('Also Ctrl+= and Ctrl+− in a terminal, and Ctrl+0 to reset.');
   $('set-autoupdate').checked = s.autoUpdate;
   $('set-font-size').textContent = String(s.terminalFontSize);
   $('set-copy-select').checked = s.copyOnSelect;

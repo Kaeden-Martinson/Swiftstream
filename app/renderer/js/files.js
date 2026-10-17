@@ -1,6 +1,6 @@
 'use strict';
 // Files view: this computer on the left, the server on the right. Each pane has its own
-// back/forward history. Drag between panes (or in from Explorer) to transfer.
+// back/forward history. Drag between panes (or in from the file manager) to transfer.
 
 function newPane(side, host = null) {
   return { side, host, cwd: null, listing: null, selection: new Set(), anchor: null, history: [], hIndex: -1, request: 0, loading: false, animate: false, error: null, filter: '' };
@@ -314,7 +314,7 @@ async function deleteEntries(pane, entries) {
   if (pane.side === 'remote') {
     // Server deletes are permanent, so always ask.
     if (!(await confirmDialog(`Delete ${what}?`, `This permanently deletes ${what} from ${pane.host}. It can't be undone.`, 'Delete', true))) return;
-  } else if (settings().confirmDelete && !(await confirmDialog(`Move ${what} to the Recycle Bin?`, 'You can restore it from the Recycle Bin.', 'Move to Recycle Bin', true))) {
+  } else if (settings().confirmDelete && !(await confirmDialog(`Move ${what} to the ${TRASH}?`, `You can restore it from the ${TRASH}.`, `Move to ${TRASH}`, true))) {
     return;
   }
   try {
@@ -322,7 +322,7 @@ async function deleteEntries(pane, entries) {
       const p = entryPath(pane, entry);
       await call(pane.side === 'local' ? api.files.localTrash(p) : api.files.rm(pane.host, p));
     }
-    toast(pane.side === 'local' ? `Moved ${what} to the Recycle Bin` : `Deleted ${what}`);
+    toast(pane.side === 'local' ? `Moved ${what} to the ${TRASH}` : `Deleted ${what}`);
   } catch (err) {
     paneError(pane, err);
   }
@@ -363,7 +363,7 @@ function rowMenu(pane, entry) {
     else {
       items.push({ label: 'Open', icon: 'file', hint: 'Enter', run: () => openRemoteFile(pane.host, path) });
       for (const app of editorApps) items.push({ label: `Open with ${app.label}`, icon: 'external', run: () => openRemoteFile(pane.host, path, app.id) });
-      items.push({ label: 'Open with…', icon: 'external', run: () => openRemoteFile(pane.host, path, 'choose') });
+      if (PLATFORM === 'win32') items.push({ label: 'Open with…', icon: 'external', run: () => openRemoteFile(pane.host, path, 'choose') });
       items.push('separator');
     }
   }
@@ -374,10 +374,10 @@ function rowMenu(pane, entry) {
   }
   items.push('separator');
   if (!many) items.push({ label: 'Rename…', icon: 'pencil', hint: 'F2', run: () => renameEntry(pane, entry) });
-  items.push({ label: pane.side === 'local' ? 'Move to Recycle Bin' : many ? `Delete ${selected.length} items…` : 'Delete…', icon: 'trash', hint: 'Del', danger: true, run: () => deleteEntries(pane, selected) });
+  items.push({ label: pane.side === 'local' ? `Move to ${TRASH}` : many ? `Delete ${selected.length} items…` : 'Delete…', icon: 'trash', hint: 'Del', danger: true, run: () => deleteEntries(pane, selected) });
   items.push('separator');
   items.push({ label: 'Copy path', icon: 'copy', run: () => (api.copy(path), toast('Path copied')) });
-  if (pane.side === 'local') items.push({ label: 'Show in Explorer', icon: 'external', run: () => api.files.reveal(path) });
+  if (pane.side === 'local') items.push({ label: IS_MAC ? 'Show in Finder' : PLATFORM === 'win32' ? 'Show in Explorer' : 'Show in folder', icon: 'external', run: () => api.files.reveal(path) });
   if (pane.side === 'remote' && !many) {
     items.push(...actionMenuItems(entry.isDirectory ? 'folder' : 'file', { host: pane.host, path, name: entry.name, dir: pane.cwd }));
   }
@@ -395,7 +395,7 @@ function backgroundMenu(pane) {
     items.push('separator', { label: 'Upload files…', icon: 'up', run: () => pickAndUpload('files') }, { label: 'Upload a folder…', icon: 'up', run: () => pickAndUpload('folder') });
     items.push(...actionMenuItems('folder', { host: pane.host, path: pane.cwd, name: basenameOf(pane.cwd), dir: pane.cwd }));
   } else {
-    items.push({ label: 'Open in Explorer', icon: 'external', run: () => api.files.localOpen(pane.cwd) });
+    items.push({ label: IS_MAC ? 'Open in Finder' : PLATFORM === 'win32' ? 'Open in Explorer' : 'Open in the file manager', icon: 'external', run: () => api.files.localOpen(pane.cwd) });
   }
   return items;
 }
@@ -484,7 +484,7 @@ function endDrag() {
   clearDropUI();
 }
 
-/** Which drops a pane accepts: the other pane's rows, or (server pane only) files from Explorer. */
+/** Which drops a pane accepts: the other pane's rows, or (server pane only) files from the file manager. */
 function canDrop(side, e) {
   const pane = paneFor(side);
   if (!pane?.cwd || pane.cwd === DRIVES) return false;

@@ -188,16 +188,18 @@ async function startSession(session, pane = session.term) {
 function onTerminalKey(session, pane, e) {
   if (e.type !== 'keydown') return true;
   const key = e.key.toLowerCase();
-  // Ctrl+Shift+C copies, like other terminals on Windows and Linux.
-  if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
+  // Windows and Linux: Ctrl+Shift+C/F/D, so plain Ctrl+C/F/D still reach the shell. macOS: Cmd+C/F/D, like iTerm.
+  const cmd = (code) => (IS_MAC ? e.metaKey && !e.shiftKey : e.ctrlKey && e.shiftKey) && e.code === code;
+  if (cmd('KeyC')) {
     const text = pane.xterm.getSelection();
     if (text) api.copy(text);
     return false;
   }
-  if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') return openSearch(), false;
-  if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') return splitPane(session), false;
-  // Ctrl+= / Ctrl+- / Ctrl+0: text size, for every terminal.
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && (key === '=' || key === '+' || key === '-' || key === '0')) {
+  if (IS_MAC && e.metaKey && e.code === 'KeyV') return pasteInto(pane), false;
+  if (cmd('KeyF')) return openSearch(), false;
+  if (cmd('KeyD')) return splitPane(session), false;
+  // Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on a Mac): text size, for every terminal.
+  if (modKey(e) && !e.shiftKey && !e.altKey && (key === '=' || key === '+' || key === '-' || key === '0')) {
     setTerminalFontSize(key === '0' ? FONT_SIZES.default : termFontSize() + (key === '-' ? -1 : 1));
     return false;
   }
@@ -225,12 +227,12 @@ function paneMenu(session, pane) {
   focusPane(session, pane);
   const selection = pane.xterm.getSelection();
   return [
-    { label: 'Copy', icon: 'copy', hint: 'Ctrl+Shift+C', disabled: !selection, run: () => api.copy(selection) },
-    { label: 'Paste', icon: 'files', hint: 'Ctrl+V', run: () => pasteInto(pane) },
-    { label: 'Find…', icon: 'search', hint: 'Ctrl+Shift+F', run: openSearch },
+    { label: 'Copy', icon: 'copy', hint: IS_MAC ? '⌘C' : 'Ctrl+Shift+C', disabled: !selection, run: () => api.copy(selection) },
+    { label: 'Paste', icon: 'files', hint: keyName('Ctrl+V'), run: () => pasteInto(pane) },
+    { label: 'Find…', icon: 'search', hint: IS_MAC ? '⌘F' : 'Ctrl+Shift+F', run: openSearch },
     'separator',
-    { label: 'Split right', icon: 'plus', hint: 'Ctrl+Shift+D', disabled: session.panes.length >= MAX_PANES, run: () => splitPane(session) },
-    { label: session.panes.length > 1 ? 'Close this terminal' : 'Close tab', icon: 'x', hint: session.panes.length > 1 ? 'Ctrl+Shift+W' : 'Ctrl+W', run: () => closePane(session, pane) },
+    { label: 'Split right', icon: 'plus', hint: IS_MAC ? '⌘D' : 'Ctrl+Shift+D', disabled: session.panes.length >= MAX_PANES, run: () => splitPane(session) },
+    { label: session.panes.length > 1 ? 'Close this terminal' : 'Close tab', icon: 'x', hint: keyName(session.panes.length > 1 ? 'Ctrl+Shift+W' : 'Ctrl+W'), run: () => closePane(session, pane) },
     'separator',
     { label: 'Clear', icon: 'trash', run: () => pane.xterm.clear() },
   ];

@@ -171,7 +171,7 @@
         <section class="set-group">
           <h2>Terminal</h2>
           <div class="set-row">
-            <span><b>Text size</b><small>Also Ctrl+= and Ctrl+− in a terminal, and Ctrl+0 to reset.</small></span>
+            <span><b>Text size</b><small id="set-font-hint">Also Ctrl+= and Ctrl+− in a terminal, and Ctrl+0 to reset.</small></span>
             <span class="stepper">
               <button class="icon-btn" id="set-font-down" type="button" title="Smaller" aria-label="Smaller text">−</button>
               <b id="set-font-size">13.5</b>
@@ -216,7 +216,7 @@
             <input type="checkbox" class="switch" id="set-upload-save">
           </label>
           <label class="set-row">
-            <span><b>Ask before moving files to the Recycle Bin</b><small>Deleting on a server always asks, because it can't be undone.</small></span>
+            <span><b id="set-confirm-delete-label">Ask before moving files to the Recycle Bin</b><small>Deleting on a server always asks, because it can't be undone.</small></span>
             <input type="checkbox" class="switch" id="set-confirm-delete">
           </label>
         </section>

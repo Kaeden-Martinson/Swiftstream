@@ -141,7 +141,8 @@ $('tab-home').addEventListener('click', () => activate(null));
 
 // Ctrl+Tab / Ctrl+Shift+Tab cycle through the servers home and open tabs; Ctrl+W closes a tab.
 window.addEventListener('keydown', (e) => {
-  if (!e.ctrlKey) return;
+  // Ctrl+Tab on every system; Ctrl+T / Ctrl+W are Cmd+T / Cmd+W on a Mac.
+  if (!(e.ctrlKey && e.key === 'Tab') && !modKey(e)) return;
   if (e.key === 'Tab') {
     e.preventDefault();
     const order = [null, ...state.tabs];

@@ -60,3 +60,25 @@ jobs:
           name: app-test-screenshots
           path: .test-home/app/*/shots/
           if-no-files-found: ignore
+
+  package:
+    name: Desktop app packages (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix app
+      - name: Build the app and command line for this system (not published)
+        run: npm run release
+      - run: ls -la site/downloads

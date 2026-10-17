@@ -86,9 +86,9 @@ let sshServer = await startSshServer(sshPort, rsaKey());
 
 const clientHome = path.join(work, 'client');
 // Async on purpose: the SSH server above runs in this same process, so a blocking spawnSync would freeze it.
-const run = (args, { input = '', home = clientHome, bin = [process.execPath, cli] } = {}) =>
+const run = (args, { input = '', home = clientHome, bin = [process.execPath, cli], env = {} } = {}) =>
   new Promise((resolve) => {
-    const child = spawn(bin[0], [...bin.slice(1), ...args], { env: { ...process.env, SWIFTSTREAM_HOME: home, SSH_AUTH_SOCK: '' } });
+    const child = spawn(bin[0], [...bin.slice(1), ...args], { env: { ...process.env, SWIFTSTREAM_HOME: home, SSH_AUTH_SOCK: '', ...env } });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => (out += d));
@@ -151,6 +151,22 @@ try {
   r = await ok(['exec', 'box', '--', 'echo', 'back-up']);
   assert.match(r.out, /back-up/);
   console.log('ok  stopped server restarted with the key, no password');
+
+  // A server running an older Swiftstream is updated by "connect" before the shell opens, with the key.
+  const bundle = fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'), 'utf8');
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const oldBundle = path.join(work, 'old-swiftstream.cjs');
+  fs.writeFileSync(oldBundle, bundle.replace(JSON.stringify(version), JSON.stringify('0.0.1')));
+  await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { env: { SWIFTSTREAM_BUNDLE: oldBundle } });
+  const remoteBundle = path.join(users.tester.home, '.swiftstream', 'bin', 'swiftstream.cjs');
+  assert.match(fs.readFileSync(remoteBundle, 'utf8'), /"0\.0\.1"/);
+  r = await ok(['connect', 'box'], { input: 'echo after-update\nexit\n' });
+  assert.ok(r.err.includes(`box runs Swiftstream 0.0.1; updating it to ${version}`), r.err);
+  assert.match(r.out, /after-update/);
+  assert.ok(fs.readFileSync(remoteBundle).equals(fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'))), 'server was not updated');
+  r = await ok(['connect', 'box'], { input: 'exit\n' });
+  assert.doesNotMatch(r.err, /updating it/);
+  console.log('ok  older server updated by connect, with the key');
 
   // The standalone executable uploads the copy embedded in itself.
   if (fs.existsSync(exe)) {

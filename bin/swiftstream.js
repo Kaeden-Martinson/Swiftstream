@@ -18,7 +18,7 @@ import { closest, deployHost, getHostOrExplain, probeHost, removeHost, saveProbe
 import { ask, askSecret, c, confirm, info, ok, printError, table, warn } from '../src/ui.js';
 import { formatBytes, parseSize } from '../src/util.js';
 
-import { VERSION } from '../src/version.js';
+import { VERSION, isOlderVersion } from '../src/version.js';
 import { selfCommand } from '../src/self.js';
 import { openDesktopApp } from '../src/desktop.js';
 
@@ -174,6 +174,7 @@ installs itself on the server, and saves it under --name (default: the host's sh
     async run([target], opts) {
       need(target, this.usage);
       const name = await resolveOrSetUp(target, opts);
+      await updateServerIfOlder(name, opts);
       await withServerRunning(name, opts, async () => {
         await withClient(name, {}, async (conn) => {
           process.exitCode = await openShell(conn);
@@ -359,6 +360,30 @@ async function resolveOrSetUp(target, opts) {
 }
 
 /** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
+/**
+ * A server running an older Swiftstream than this one is updated before the shell opens: same SSH
+ * login as setup, normally with this computer's key. If that fails, the old version is used.
+ */
+async function updateServerIfOlder(name, opts) {
+  const host = loadHosts()[name];
+  if (!host?.ssh) return;
+  let remote;
+  try {
+    remote = await withClient(name, {}, (conn) => conn.request('GET', '/v1/info', { timeout: 8000 }));
+  } catch {
+    return; // not reachable: withServerRunning deals with that
+  }
+  if (!remote?.version || !isOlderVersion(remote.version, VERSION)) return;
+  info(`${name} runs Swiftstream ${remote.version}; updating it to ${VERSION}`);
+  try {
+    const port = Number(new URL(host.url).port) || DEFAULT_PORT;
+    // Key login only: a password prompt in the middle of "connect" would be a surprise.
+    await deployCommand(name, host.ssh, { ...opts, port, 'ssh-port': opts['ssh-port'] || host.sshPort }, { quiet: true, keyOnly: true });
+  } catch (err) {
+    warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Connecting with the current version.`);
+  }
+}
+
 async function withServerRunning(name, opts, fn) {
   try {
     return await fn();
@@ -372,7 +397,7 @@ async function withServerRunning(name, opts, fn) {
   }
 }
 
-async function deployCommand(name, target, opts, { quiet = false } = {}) {
+async function deployCommand(name, target, opts, { quiet = false, keyOnly = false } = {}) {
   validateHostName(name);
   const { host, info: remote } = await deployHost({
     name,
@@ -380,8 +405,10 @@ async function deployCommand(name, target, opts, { quiet = false } = {}) {
     sshPort: opts['ssh-port'],
     port: Number(opts.port) || DEFAULT_PORT,
     askPassword: (attempt) =>
-      // Piped input (scripts) gets one try; a person at the keyboard gets three.
-      attempt && !process.stdin.isTTY
+      keyOnly
+        ? Promise.reject(new UserError("this computer's SSH key wasn't accepted"))
+        : // Piped input (scripts) gets one try; a person at the keyboard gets three.
+          attempt && !process.stdin.isTTY
         ? Promise.reject(new UserError('Wrong password.'))
         : askSecret(attempt ? 'Wrong password, try again:' : `Password for ${target}:`),
     confirmHostKey: async ({ host: sshHost, fingerprint }) => {

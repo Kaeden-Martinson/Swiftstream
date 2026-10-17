@@ -9,6 +9,7 @@ What changed in each version. The release workflow copies a version's section in
 - A pinned taskbar button keeps the Swiftstream name and logo.
 - The installer always makes sure the desktop shortcut is there, updates included.
 - The desktop app updates itself: new versions download in the background, then "Restart to update".
+- Servers running an older Swiftstream are updated automatically: by the app (once their terminals are closed) and by `swiftstream connect`, with this computer's key.
 
 ## [0.1.1] - 2026-10-16
 

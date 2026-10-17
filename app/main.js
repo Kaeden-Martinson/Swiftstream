@@ -15,6 +15,7 @@ import { keyFingerprint, loadOrCreateIdentity } from './core/keys.js';
 import { openChannel } from './core/shell.js';
 import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js';
 import { walk } from './core/util.js';
+import { VERSION, isOlderVersion } from './core/version.js';
 
 const dirname = import.meta.dirname;
 let win = null;
@@ -431,7 +432,7 @@ app.on('will-quit', () => {
 
 // ---- health: notice a stopped Swiftstream and restart it over SSH ---------------
 
-const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30, autoUpdate: true };
+const DEFAULT_SETTINGS = { autoHeal: true, healthInterval: 30, autoUpdate: true, updateServers: true };
 const settings = () => ({ ...DEFAULT_SETTINGS, ...(loadState().settings || {}) });
 const healing = new Map(); // name -> { busy, last }
 const HEAL_COOLDOWN_MS = 120_000;
@@ -440,6 +441,7 @@ async function checkHealth(name) {
   try {
     const info = await withClient(name, (c) => c.request('GET', '/v1/info', { timeout: 8000 }));
     send('health', { name, status: 'up', info });
+    maybeUpdateServer(name, info);
     return true;
   } catch (err) {
     const host = loadHosts()[name];
@@ -451,13 +453,31 @@ async function checkHealth(name) {
 }
 
 /** Log in with this computer's key (authorized at setup) and start Swiftstream again. Never asks for a password. */
-async function heal(name) {
+const heal = (name) => redeployUnattended(name, { cooldown: HEAL_COOLDOWN_MS, statuses: ['healing', 'healed', 'heal-failed'] });
+
+// ---- servers running an older Swiftstream than this app are updated the same way ----------------
+// Updating restarts the server, which ends its open terminals, so it waits until none are open.
+const UPDATE_RETRY_MS = 30 * 60 * 1000;
+const updateNoticeShown = new Set();
+function maybeUpdateServer(name, info) {
+  const host = loadHosts()[name];
+  if (!host?.ssh || !info?.version || !isOlderVersion(info.version, VERSION) || settings().updateServers === false) return;
+  const terminalOpen = [...terminals.values()].some((t) => t.host === name);
+  if (!terminalOpen) {
+    redeployUnattended(name, { cooldown: UPDATE_RETRY_MS, statuses: ['updating', 'updated', 'update-failed'], extra: { from: info.version, to: VERSION } });
+  } else if (!updateNoticeShown.has(name)) {
+    updateNoticeShown.add(name);
+    send('health', { name, status: 'outdated', from: info.version, to: VERSION });
+  }
+}
+
+async function redeployUnattended(name, { cooldown, statuses: [busy, done, failed], extra = {} }) {
   const st = healing.get(name) || { busy: false, last: 0 };
-  if (st.busy || Date.now() - st.last < HEAL_COOLDOWN_MS) return;
+  if (st.busy || Date.now() - st.last < cooldown) return;
   st.busy = true;
   st.last = Date.now();
   healing.set(name, st);
-  send('health', { name, status: 'healing' });
+  send('health', { name, status: busy, ...extra });
   try {
     const host = loadHosts()[name];
     dropClient(name);
@@ -469,9 +489,9 @@ async function heal(name) {
       bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
       confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
     });
-    send('health', { name, status: 'healed', info });
+    send('health', { name, status: done, info, ...extra });
   } catch (err) {
-    send('health', { name, status: 'heal-failed', error: explainForApp(err, name) });
+    send('health', { name, status: failed, error: explainForApp(err, name), ...extra });
   } finally {
     st.busy = false;
   }

@@ -162,6 +162,10 @@
             <span><b>Restart Swiftstream automatically</b><small>If a server reboots or Swiftstream stops, the app logs in over SSH with this computer's key and starts it again, then reconnects your terminal. Works for servers set up with an SSH login.</small></span>
             <input type="checkbox" class="switch" id="set-autoheal">
           </label>
+          <label class="set-row">
+            <span><b>Keep servers up to date</b><small>A server running an older Swiftstream than this app is updated over SSH, the same way it was set up. It waits until that server's terminals are closed.</small></span>
+            <input type="checkbox" class="switch" id="set-update-servers">
+          </label>
           <div class="set-row">
             <span><b>Check servers every</b><small>Open tabs are checked this often; other servers less often.</small></span>
             <div class="segmented four" role="radiogroup" aria-label="Check servers every" id="set-interval">

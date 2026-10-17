@@ -469,3 +469,26 @@ option { background: var(--panel); color: var(--text); }
 .tp-label { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tp-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tp-empty { padding: 18px 14px; font-size: 13px; }
+
+/* Terminal tabs: one or more panes side by side */
+.terminal-pane > .term-group { position: absolute; inset: 10px 6px 6px 14px; display: flex; gap: 0; }
+.term-group > .term { position: relative; flex: 1; min-width: 0; }
+.term-group.split > .term { padding: 0 8px; }
+.term-group.split > .term + .term { border-left: 1px solid var(--line); }
+.term-group.split > .term:not(.focused) { opacity: .62; transition: opacity .15s; }
+.term-group.split > .term:not(.focused):hover { opacity: .85; }
+
+/* Find in terminal */
+.term-search { position: absolute; top: 10px; right: 18px; z-index: 6; display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 4px 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 24px var(--shadow); }
+.term-search[hidden] { display: none; }
+.term-search > svg { width: 14px; height: 14px; color: var(--faint); }
+.term-search input { width: 200px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; outline: none; }
+.term-search-count { font-size: 12px; min-width: 64px; text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
+.term-search.none input { color: var(--danger); }
+.term-search .icon-btn { width: 26px; height: 26px; }
+.term-search .icon-btn svg { width: 13px; height: 13px; }
+
+/* Settings › Terminal › Text size */
+.stepper { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--bg); }
+.stepper .icon-btn { width: 28px; height: 28px; font-size: 16px; font-weight: 600; }
+.stepper b { min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }

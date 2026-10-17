@@ -1,8 +1,8 @@
-/* global Terminal, FitAddon */
+/* global Terminal, FitAddon, SearchAddon */
 'use strict';
-// One xterm per server tab, kept alive while you switch tabs.
+// Terminal tabs: one or more xterm panes per tab, kept alive while you switch tabs.
 
-const terminals = new Map(); // terminal id -> session id
+const terminals = new Map(); // terminal id -> pane
 
 const TERM_THEMES = {
   dark: {
@@ -40,152 +40,323 @@ const termTheme = () => TERM_THEMES[document.documentElement.dataset.theme === '
 
 // Recolor open terminals when the theme changes.
 window.addEventListener('themechange', () => {
-  for (const session of state.sessions.values()) if (session.term) session.term.xterm.options.theme = termTheme();
+  for (const pane of allPanes()) pane.xterm.options.theme = termTheme();
 });
 
+// A terminal tab holds one or more panes side by side (Split right), each its own shell on the same
+// server. session.panes lists them; session.term is the one you're typing in.
+const MAX_PANES = 4;
+const FONT_SIZES = { min: 9, max: 28, default: 13.5 };
+const allPanes = () => [...state.sessions.values()].flatMap((s) => s.panes || []);
+const termFontSize = () => Math.min(FONT_SIZES.max, Math.max(FONT_SIZES.min, Number(settings().terminalFontSize) || FONT_SIZES.default));
 
 function ensureTerminal(session) {
-  const v = session;
-  const name = session.host;
-  if (v.term) {
-    requestAnimationFrame(() => fitTerminal(v.term));
-    v.term.xterm.focus();
+  if (session.panes?.length) {
+    requestAnimationFrame(() => session.panes.forEach(fitTerminal));
+    session.term.xterm.focus();
     return;
   }
+  session.panes = [];
+  session.group = el('div', { className: 'term-group' });
+  session.group.dataset.session = session.id;
+  $('terminal-pane').append(session.group);
+  addPane(session);
+}
+
+function addPane(session) {
   const container = el('div', { className: 'term' });
   container.dataset.session = session.id;
-  $('terminal-pane').append(container);
+  session.group.append(container);
   const xterm = new Terminal({
     fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, Menlo, monospace",
-    fontSize: 13.5,
+    fontSize: termFontSize(),
     lineHeight: 1.15,
     cursorBlink: true,
     scrollback: 5000,
+    allowProposedApi: true, // search result highlighting
     theme: termTheme(),
   });
   const fit = new FitAddon.FitAddon();
+  const search = new SearchAddon.SearchAddon();
   xterm.loadAddon(fit);
+  xterm.loadAddon(search);
   xterm.open(container);
   container.append(
     el(
       'div',
       { className: 'term-loading' },
       ...['46%', '30%', '58%', '22%'].map((w) => el('div', { className: 'sk-line' }, skeleton(w))),
-      el('div', { className: 'term-loading-label', textContent: `Connecting to ${name}…` }),
+      el('div', { className: 'term-loading-label', textContent: `Connecting to ${session.host}…` }),
     ),
   );
-  v.term = { xterm, fit, id: null, pty: true, line: '', container };
-  // Ctrl+Shift+C copies, like other terminals on Windows and Linux.
-  xterm.attachCustomKeyEventHandler((e) => {
-    if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
-      const text = xterm.getSelection();
-      if (text) api.copy(text);
-      return false;
-    }
-    return true;
+  const pane = { xterm, fit, search, id: null, pty: true, line: '', container, sessionId: session.id };
+  session.panes.push(pane);
+  session.term = pane;
+  paintPanes(session);
+
+  xterm.attachCustomKeyEventHandler((e) => onTerminalKey(session, pane, e));
+  xterm.onData((data) => onTerminalInput(pane, data));
+  xterm.onResize(({ cols, rows }) => pane.id && api.term.resize(pane.id, cols, rows));
+  xterm.onSelectionChange(() => {
+    const text = xterm.getSelection();
+    if (text && settings().copyOnSelect) api.copy(text);
   });
-  xterm.onData((data) => onTerminalInput(v.term, data));
-  xterm.onResize(({ cols, rows }) => v.term.id && api.term.resize(v.term.id, cols, rows));
+  xterm.textarea?.addEventListener('focus', () => focusPane(session, pane, { fromXterm: true }));
+  container.addEventListener('pointerdown', () => focusPane(session, pane));
+  onContextMenu(container, () => paneMenu(session, pane));
+
   requestAnimationFrame(() => {
-    fitTerminal(v.term);
-    startSession(session);
+    session.panes.forEach(fitTerminal);
+    startSession(session, pane);
     xterm.focus();
   });
+  return pane;
 }
 
-function fitTerminal(term) {
+function focusPane(session, pane, { fromXterm = false } = {}) {
+  if (session.term === pane && fromXterm) return;
+  session.term = pane;
+  paintPanes(session);
+  if (!fromXterm) pane.xterm.focus();
+  if (!$('term-search').hidden) runSearch(); // search follows the pane you're in
+}
+
+function paintPanes(session) {
+  session.group.classList.toggle('split', session.panes.length > 1);
+  for (const p of session.panes) p.container.classList.toggle('focused', p === session.term);
+}
+
+function splitPane(session = activeSession()) {
+  if (session?.kind !== 'terminal' || !session.panes) return;
+  if (session.panes.length >= MAX_PANES) return toast(`A tab holds up to ${MAX_PANES} terminals`);
+  addPane(session);
+}
+
+/** Close one pane; closing the last one closes the tab. */
+function closePane(session, pane = session.term) {
+  if (session.panes.length <= 1) return closeTab(session.id);
+  disposePane(pane);
+  session.panes = session.panes.filter((p) => p !== pane);
+  session.term = session.panes[Math.max(0, session.panes.length - 1)];
+  paintPanes(session);
+  requestAnimationFrame(() => session.panes.forEach(fitTerminal));
+  session.term.xterm.focus();
+}
+
+function disposePane(pane) {
+  if (pane.id) {
+    api.term.close(pane.id);
+    terminals.delete(pane.id);
+  }
+  pane.xterm.dispose();
+  pane.container.remove();
+}
+
+function fitTerminal(pane) {
   try {
-    term.fit.fit();
+    pane.fit.fit();
   } catch {
     /* hidden; fitted again when shown */
   }
 }
 
-/** End a tab's terminal session and free its xterm (closing its tab). */
+/** End a tab's terminal sessions and free their xterms (closing its tab). */
 function disposeTerminal(session) {
-  const v = session;
-  if (!v?.term) return;
-  if (v.term.id) {
-    api.term.close(v.term.id);
-    terminals.delete(v.term.id);
-  }
-  v.term.xterm.dispose();
-  v.term.container.remove();
-  v.term = null;
+  if (!session?.panes) return;
+  session.panes.forEach(disposePane);
+  session.group.remove();
+  session.panes = null;
+  session.term = null;
 }
 
-async function startSession(session) {
-  const term = session.term;
-  if (!term) return;
-  term.container.classList.add('connecting');
+async function startSession(session, pane = session.term) {
+  if (!pane) return;
+  pane.container.classList.add('connecting');
   try {
-    term.id = await call(api.term.open(session.host, term.xterm.cols, term.xterm.rows));
-    terminals.set(term.id, session.id);
+    pane.id = await call(api.term.open(session.host, pane.xterm.cols, pane.xterm.rows));
+    terminals.set(pane.id, pane);
   } catch (err) {
-    term.container.classList.remove('connecting');
-    term.xterm.write(`\x1b[31m${err.message}\x1b[0m\r\n${err.hint ? `\x1b[2m${err.hint.replace(/\n/g, '\r\n')}\x1b[0m\r\n` : ''}`);
-    term.ended = true;
-    term.xterm.write('\r\n\x1b[2mPress Enter to try again.\x1b[0m\r\n');
+    pane.container.classList.remove('connecting');
+    pane.xterm.write(`\x1b[31m${err.message}\x1b[0m\r\n${err.hint ? `\x1b[2m${err.hint.replace(/\n/g, '\r\n')}\x1b[0m\r\n` : ''}`);
+    pane.ended = true;
+    pane.xterm.write('\r\n\x1b[2mPress Enter to try again.\x1b[0m\r\n');
   }
 }
 
-function onTerminalInput(term, data) {
-  if (term.ended) {
+// ---------- keys: copy, search, font size, split ----------
+
+function onTerminalKey(session, pane, e) {
+  if (e.type !== 'keydown') return true;
+  const key = e.key.toLowerCase();
+  // Ctrl+Shift+C copies, like other terminals on Windows and Linux.
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
+    const text = pane.xterm.getSelection();
+    if (text) api.copy(text);
+    return false;
+  }
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyF') return openSearch(), false;
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyD') return splitPane(session), false;
+  // Ctrl+= / Ctrl+- / Ctrl+0: text size, for every terminal.
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && (key === '=' || key === '+' || key === '-' || key === '0')) {
+    setTerminalFontSize(key === '0' ? FONT_SIZES.default : termFontSize() + (key === '-' ? -1 : 1));
+    return false;
+  }
+  return true;
+}
+
+function setTerminalFontSize(size) {
+  const next = Math.min(FONT_SIZES.max, Math.max(FONT_SIZES.min, size));
+  updateSettings({ terminalFontSize: next });
+  for (const p of allPanes()) {
+    p.xterm.options.fontSize = next;
+    fitTerminal(p);
+  }
+  if ($('set-font-size')) $('set-font-size').textContent = String(next);
+  toast(`Terminal text size ${next}`);
+}
+
+async function pasteInto(pane) {
+  const text = await call(api.readClipboard()).catch(() => '');
+  if (text) pane.xterm.paste(text);
+  pane.xterm.focus();
+}
+
+function paneMenu(session, pane) {
+  focusPane(session, pane);
+  const selection = pane.xterm.getSelection();
+  return [
+    { label: 'Copy', icon: 'copy', hint: 'Ctrl+Shift+C', disabled: !selection, run: () => api.copy(selection) },
+    { label: 'Paste', icon: 'files', hint: 'Ctrl+V', run: () => pasteInto(pane) },
+    { label: 'Find…', icon: 'search', hint: 'Ctrl+Shift+F', run: openSearch },
+    'separator',
+    { label: 'Split right', icon: 'plus', hint: 'Ctrl+Shift+D', disabled: session.panes.length >= MAX_PANES, run: () => splitPane(session) },
+    { label: session.panes.length > 1 ? 'Close this terminal' : 'Close tab', icon: 'x', hint: session.panes.length > 1 ? 'Ctrl+Shift+W' : 'Ctrl+W', run: () => closePane(session, pane) },
+    'separator',
+    { label: 'Clear', icon: 'trash', run: () => pane.xterm.clear() },
+  ];
+}
+
+// ---------- search (Ctrl+Shift+F) ----------
+
+// Match highlights, per theme (the active match stands out in the accent color).
+const searchDecorations = () =>
+  document.documentElement.dataset.theme === 'light'
+    ? { matchBackground: '#c9ecda', activeMatchBackground: '#0f9d63', matchOverviewRuler: '#0f9d63', activeMatchColorOverviewRuler: '#0f9d63' }
+    : { matchBackground: '#3a4a3f', activeMatchBackground: '#3ddc97', matchOverviewRuler: '#3ddc97', activeMatchColorOverviewRuler: '#3ddc97' };
+
+function openSearch() {
+  const pane = activeSession()?.term;
+  if (!pane) return;
+  $('term-search').hidden = false;
+  const input = $('term-search-input');
+  const selection = pane.xterm.getSelection();
+  if (selection && !selection.includes('\n')) input.value = selection;
+  input.focus();
+  input.select();
+  runSearch();
+}
+
+function closeSearch() {
+  $('term-search').hidden = true;
+  for (const p of allPanes()) p.search.clearDecorations();
+  activeSession()?.term?.xterm.focus();
+}
+
+function runSearch(direction = 'next') {
+  const pane = activeSession()?.term;
+  const query = $('term-search-input').value;
+  if (!pane) return;
+  if (!query) {
+    pane.search.clearDecorations();
+    $('term-search-count').textContent = '';
+    return;
+  }
+  const opts = { incremental: direction === 'incremental', decorations: searchDecorations() };
+  const found = direction === 'previous' ? pane.search.findPrevious(query, opts) : pane.search.findNext(query, opts);
+  $('term-search').classList.toggle('none', !found);
+  if (!found) $('term-search-count').textContent = 'No results';
+}
+
+$('term-search-input').addEventListener('input', () => runSearch('incremental'));
+$('term-search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runSearch(e.shiftKey ? 'previous' : 'next');
+  else if (e.key === 'Escape') closeSearch();
+  else return;
+  e.preventDefault();
+});
+$('term-search-prev').addEventListener('click', () => runSearch('previous'));
+$('term-search-next').addEventListener('click', () => runSearch('next'));
+$('term-search-close').addEventListener('click', closeSearch);
+
+/** Result count from the search addon ("3 of 12"). */
+function watchSearchResults(pane) {
+  pane.search.onDidChangeResults?.(({ resultIndex, resultCount }) => {
+    if (activeSession()?.term !== pane || $('term-search').hidden) return;
+    $('term-search-count').textContent = resultCount ? `${resultIndex + 1} of ${resultCount}` : 'No results';
+    $('term-search').classList.toggle('none', !resultCount);
+  });
+}
+
+// ---------- input and output ----------
+
+function onTerminalInput(pane, data) {
+  if (pane.ended) {
     if (data === '\r') {
-      term.ended = false;
-      term.xterm.reset();
-      startSession(state.sessions.get(term.container.dataset.session));
+      pane.ended = false;
+      pane.xterm.reset();
+      startSession(state.sessions.get(pane.sessionId), pane);
     }
     return;
   }
-  if (!term.id) return;
-  if (term.pty) return api.term.write(term.id, data);
+  if (!pane.id) return;
+  if (pane.pty) return api.term.write(pane.id, data);
   // No terminal on the server side: simple line editing here.
   for (const ch of data) {
     if (ch === '\r') {
-      term.xterm.write('\r\n');
-      api.term.write(term.id, `${term.line}\n`);
-      term.line = '';
+      pane.xterm.write('\r\n');
+      api.term.write(pane.id, `${pane.line}\n`);
+      pane.line = '';
     } else if (ch === '\x7f' || ch === '\b') {
-      if (term.line) {
-        term.line = term.line.slice(0, -1);
-        term.xterm.write('\b \b');
+      if (pane.line) {
+        pane.line = pane.line.slice(0, -1);
+        pane.xterm.write('\b \b');
       }
     } else if (ch >= ' ') {
-      term.line += ch;
-      term.xterm.write(ch);
+      pane.line += ch;
+      pane.xterm.write(ch);
     }
   }
 }
 
-const termFor = (id) => state.sessions.get(terminals.get(id))?.term || null;
+const termFor = (id) => terminals.get(id) || null;
 
 api.term.onHello((id, { pty }) => {
-  const term = termFor(id);
-  if (!term) return;
-  term.pty = pty;
-  term.container.classList.remove('connecting');
-  term.xterm.reset();
+  const pane = termFor(id);
+  if (!pane) return;
+  pane.pty = pty;
+  pane.container.classList.remove('connecting');
+  pane.xterm.reset();
+  watchSearchResults(pane);
   if (!pty) {
-    term.xterm.options.convertEol = true;
-    term.xterm.write("\x1b[2mBasic terminal: full-screen programs like vim won't work on this server.\x1b[0m\r\n");
+    pane.xterm.options.convertEol = true;
+    pane.xterm.write("\x1b[2mBasic terminal: full-screen programs like vim won't work on this server.\x1b[0m\r\n");
   }
 });
 api.term.onData((id, data) => termFor(id)?.xterm.write(data));
 api.term.onExit((id, code) => {
-  const term = termFor(id);
+  const pane = termFor(id);
   terminals.delete(id);
-  if (!term) return;
-  term.id = null;
-  term.ended = true;
-  term.xterm.write(`\r\n\x1b[2mSession ended${code ? ` (exit ${code})` : ''}. Press Enter to start a new one.\x1b[0m\r\n`);
+  if (!pane) return;
+  pane.id = null;
+  pane.ended = true;
+  pane.xterm.write(`\r\n\x1b[2mSession ended${code ? ` (exit ${code})` : ''}. Press Enter to start a new one.\x1b[0m\r\n`);
   // 255 = the connection dropped without an exit code: check now rather than waiting for the next round.
-  const host = state.sessions.get(term.container.dataset.session)?.host;
+  const host = state.sessions.get(pane.sessionId)?.host;
   if (code === 255 && host) call(api.health.check(host)).catch(() => {});
 });
 api.term.onError((id, err) => termFor(id)?.xterm.write(`\r\n\x1b[31m${err.message}\x1b[0m\r\n`));
 
 new ResizeObserver(() => {
-  const term = activeSession()?.term;
-  if (term && !$('terminal-pane').hidden) fitTerminal(term);
+  const session = activeSession();
+  if (session?.panes && !$('terminal-pane').hidden) session.panes.forEach(fitTerminal);
 }).observe($('terminal-pane'));

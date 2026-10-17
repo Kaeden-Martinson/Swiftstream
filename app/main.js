@@ -275,6 +275,7 @@ handle('dialog:pick', async (kind) => {
 
 handle('shell:reveal', (p) => shell.showItemInFolder(p));
 handle('clipboard:write', (text) => clipboard.writeText(text));
+handle('clipboard:read', () => clipboard.readText()); // terminal right-click › Paste
 
 // ---- transfers --------------------------------------------------------------
 

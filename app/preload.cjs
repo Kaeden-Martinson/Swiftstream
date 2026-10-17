@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('swift', {
     onError: on('term:error'),
   },
   copy: (text) => call('clipboard:write', text),
+  readClipboard: () => call('clipboard:read'),
   state: { get: () => call('state:get'), set: (patch) => call('state:set', patch) },
   onNav: on('nav'),
   devShot: (name) => call('dev:shot', name), // development screenshot runs only (see main.js)

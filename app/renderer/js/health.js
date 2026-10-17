@@ -54,10 +54,11 @@ api.health.onEvent(({ name, status, info, error, from, to }) => {
 /** Server is back: clear the banner, reconnect an ended terminal, refresh its files. */
 function afterRecovered(name) {
   for (const session of sessionsOf(name)) {
-    if (session.term?.ended) {
-      session.term.ended = false;
-      session.term.xterm.write('\r\n\x1b[2mReconnecting…\x1b[0m\r\n');
-      startSession(session);
+    for (const pane of session.panes || []) {
+      if (!pane.ended) continue;
+      pane.ended = false;
+      pane.xterm.write('\r\n\x1b[2mReconnecting…\x1b[0m\r\n');
+      startSession(session, pane);
     }
   }
   // If the visible tab was opened while the server was down, it never loaded: load it now.

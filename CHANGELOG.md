@@ -12,6 +12,7 @@ What changed in each version. The release workflow copies a version's section in
 - Servers running an older Swiftstream are updated automatically: by the app (once their terminals are closed) and by `swiftstream connect`, with this computer's key.
 - Servers from `~/.ssh/config`: the app lists them under "From your SSH config", `swiftstream import` sets them up, and `swiftstream connect <alias>` works like `ssh <alias>`. Setup uses the host's IdentityFile and the Windows OpenSSH agent.
 - Transfers can be paused, resumed and canceled; the cards show live speed and time left, and the Transfers button on the tab bar lists recent transfers with Retry. Downloads now resume too (in the app and with `swiftstream pull`), and canceling removes partial files, on the server as well.
+- Terminal: find (Ctrl+Shift+F), text size (Ctrl+= / Ctrl+− / Ctrl+0, also in Settings), copy on select (Settings), a right-click menu with Copy, Paste, Find, Split and Clear, and split panes: several terminals side by side in one tab (Ctrl+Shift+D, Ctrl+Shift+W closes one).
 
 ## [0.1.1] - 2026-10-16
 

@@ -87,7 +87,16 @@
         </div>
       </div>
 
-      <div class="pane terminal-pane" id="terminal-pane"></div>
+      <div class="pane terminal-pane" id="terminal-pane">
+        <div class="term-search" id="term-search" hidden>
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="term-search-input" placeholder="Find in terminal" spellcheck="false" aria-label="Find in terminal">
+          <span class="term-search-count muted" id="term-search-count"></span>
+          <button class="icon-btn" id="term-search-prev" type="button" title="Previous (Shift+Enter)" aria-label="Previous match"><svg aria-hidden="true"><use href="#i-up"/></svg></button>
+          <button class="icon-btn" id="term-search-next" type="button" title="Next (Enter)" aria-label="Next match"><svg aria-hidden="true"><use href="#i-down"/></svg></button>
+          <button class="icon-btn" id="term-search-close" type="button" title="Close (Esc)" aria-label="Close search"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
 
       <div class="pane files-pane" id="files-pane" hidden>
         <section class="fpane" id="local-pane" data-side="local" aria-label="This computer">
@@ -157,6 +166,22 @@
               <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
             </div>
           </div>
+        </section>
+
+        <section class="set-group">
+          <h2>Terminal</h2>
+          <div class="set-row">
+            <span><b>Text size</b><small>Also Ctrl+= and Ctrl+− in a terminal, and Ctrl+0 to reset.</small></span>
+            <span class="stepper">
+              <button class="icon-btn" id="set-font-down" type="button" title="Smaller" aria-label="Smaller text">−</button>
+              <b id="set-font-size">13.5</b>
+              <button class="icon-btn" id="set-font-up" type="button" title="Larger" aria-label="Larger text">+</button>
+            </span>
+          </div>
+          <label class="set-row">
+            <span><b>Copy text when you select it</b><small>Otherwise copy with Ctrl+Shift+C or right-click › Copy.</small></span>
+            <input type="checkbox" class="switch" id="set-copy-select">
+          </label>
         </section>
 
         <section class="set-group">
@@ -344,6 +369,7 @@
 
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="js/util.js"></script>
   <script src="js/dialogs.js"></script>
   <script src="js/contextmenu.js"></script>

@@ -130,7 +130,7 @@ function showSession(session) {
   if (!session) return;
   $('terminal-pane').hidden = session.kind !== 'terminal';
   $('files-pane').hidden = session.kind !== 'files';
-  for (const t of document.querySelectorAll('#terminal-pane > .term')) t.hidden = t.dataset.session !== session.id;
+  for (const g of document.querySelectorAll('#terminal-pane > .term-group')) g.hidden = g.dataset.session !== session.id;
   if (state.status.get(session.host) !== 'up') return;
   if (session.kind === 'terminal') ensureTerminal(session);
   else openFilesFor(session);
@@ -146,6 +146,9 @@ window.addEventListener('keydown', (e) => {
     const order = [null, ...state.tabs];
     const i = order.indexOf(state.page === 'session' ? state.activeTab : null);
     activate(order[(i + (e.shiftKey ? -1 : 1) + order.length) % order.length]);
+  } else if (e.key.toLowerCase() === 'w' && e.shiftKey && activeSession()?.panes?.length > 1) {
+    e.preventDefault();
+    closePane(activeSession()); // Ctrl+Shift+W: just the terminal you're in
   } else if (e.key.toLowerCase() === 'w' && activeSession()) {
     e.preventDefault();
     closeTab(state.activeTab);

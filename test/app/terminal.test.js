@@ -15,7 +15,8 @@ try {
     await until(() => !first.container.classList.contains('connecting') && prompted(first), 60000);
     await sleep(500);
     api.term.write(first.id, 'echo needle-one\\r\\necho hay\\r\\necho needle-two\\r\\n');
-    await until(() => (text(first).match(/needle-two/g) || []).length >= 2, 60000);
+    const printed = (pane, word) => text(pane).split('\\n').some((l) => l.trim() === word);
+    await until(() => printed(first, 'needle-two'), 60000);
 
     // Search
     openSearch();
@@ -33,7 +34,7 @@ try {
     await sleep(500);
     api.term.write(second.id, 'echo from-second-pane\\r\\n');
     try {
-      await until(() => (text(second).match(/from-second-pane/g) || []).length >= 2, 60000);
+      await until(() => printed(second, 'from-second-pane'), 60000);
     } catch {
       // Say what the second pane shows instead, for the CI annotation.
       throw new Error(\`no output in the second pane (\${second.xterm.cols} cols, pty \${second.pty}, id \${second.id}, first id \${first.id}); it shows: \${JSON.stringify(text(second).slice(-500))}\`);
@@ -56,7 +57,7 @@ try {
     return { searchCount, focusedIsSecond, bothVisible, fontSizes, menu, panesAfterClose, firstStillWorks: !!first.id };
   `);
   assert.ok(result, error);
-  assert.match(result.searchCount, /^1 of 4$/); // the shell echoes the two commands too
+  assert.match(result.searchCount, /^1 of [2-4]$/); // both outputs, plus the echoed commands where they didn't wrap
   assert.equal(result.focusedIsSecond, true);
   assert.ok(result.bothVisible.every((w) => w > 200), `pane widths ${result.bothVisible}`);
   assert.deepEqual(result.fontSizes, [16, 16]);

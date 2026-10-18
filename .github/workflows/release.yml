@@ -116,10 +116,11 @@ jobs:
       id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v4
+      # No registry-url here: with it, setup-node configures a placeholder token that npm would send
+      # instead of using trusted publishing (npm's default registry is the same one).
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
           cache: npm
       - name: npm 11.5+ (trusted publishing)
         run: npm install -g npm@latest

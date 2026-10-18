@@ -37,4 +37,6 @@ A release is a git tag. Pushing `v1.2.3` runs [.github/workflows/release.yml](..
 2. Choose **GitHub Actions** and enter: owner `Kaeden-Martinson`, repository `Swiftstream`, workflow `release.yml`.
 3. Save. Optionally set **Publishing access** to require two-factor authentication *and* disallow tokens, so only the workflow can publish.
 
+To check the setup, or to publish a version whose npm step failed, push any commit to the `npm-check` branch (for example `git push origin HEAD:npm-check`). The Release workflow then asks npm for a publish token and shows npm's answer under the run's annotations; if npm accepts it and doesn't have the commit's version yet, it publishes it. Nothing else is built or released.
+
 **Code signing** (removes the SmartScreen warning) is not set up yet. Once there's a certificate or an Azure Trusted Signing account, add its secrets and electron-builder's `win.signtoolOptions` or `win.azureSignOptions`.

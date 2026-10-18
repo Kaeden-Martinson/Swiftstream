@@ -102,6 +102,9 @@ function focusTabContent() {
   if (session?.kind === 'files') part(lastPaneSide, 'list')?.focus();
 }
 
+// The Tab key brings the focus outline back (see .arrow-nav in styles.css).
+window.addEventListener('keydown', (e) => e.key === 'Tab' && document.querySelector('.tabbar').classList.remove('arrow-nav'), true);
+
 document.querySelector('.tabbar').addEventListener('keydown', (e) => {
   const buttons = tabButtons();
   const index = buttons.indexOf(document.activeElement);
@@ -109,6 +112,7 @@ document.querySelector('.tabbar').addEventListener('keydown', (e) => {
   const move = { ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: buttons.length - 1 }[e.key];
   if (move !== undefined && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault();
+    document.querySelector('.tabbar').classList.add('arrow-nav');
     focusTabAt((move + buttons.length) % buttons.length);
     return;
   }

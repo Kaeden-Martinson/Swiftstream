@@ -514,5 +514,5 @@ option { background: var(--panel); color: var(--text); }
 .srv-tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
 .srv-tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
 
-/* Tabs: no focus outline. With the arrow keys the focused tab is the one showing, already highlighted. */
-.tabbar :is(.hometab, .srv-tab):focus-visible { outline: none; }
+/* Tabs reached with the arrow keys: no focus outline, the tab showing is highlighted already. (With Tab, it shows.) */
+.tabbar.arrow-nav :is(.hometab, .srv-tab):focus-visible { outline: none; }

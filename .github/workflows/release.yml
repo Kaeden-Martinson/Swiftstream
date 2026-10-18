@@ -9,6 +9,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+    # Pushing the npm-check branch only runs the trusted publishing check below (nothing is released).
+    branches: [npm-check]
 
 permissions:
   contents: read
@@ -16,6 +18,7 @@ permissions:
 jobs:
   check:
     name: Check version and test
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,6 +109,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" site/downloads/* feed/* --title "Swiftstream ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+
+  # Asks npm for a publish token the way "npm publish" does with trusted publishing, and reports npm's
+  # answer, plus what GitHub vouched for (npm compares that with the package's Trusted Publisher settings).
+  npm-check:
+    name: Check npm trusted publishing
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Ask npm for a publish token
+        run: |
+          token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          claims=$(echo "$token" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null || true)
+          [ -z "$claims" ] && claims=$(echo "$token" | cut -d. -f2 | tr '_-' '/+' | sed 's/$/==/' | base64 -d 2>/dev/null || true)
+          echo "::notice title=What GitHub vouched for::$(echo "$claims" | jq -c '{repository, repository_owner, workflow_ref, job_workflow_ref, environment, ref}')"
+          resp=$(curl -sS -X POST -H "Authorization: Bearer $token" https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/swiftstream)
+          if echo "$resp" | jq -e .token >/dev/null 2>&1; then
+            echo "::notice title=Trusted publishing works::npm would accept a publish of swiftstream from this workflow"
+          else
+            echo "::error title=npm refused the token exchange::$resp"
+            exit 1
+          fi
 
   npm:
     name: Publish to npm

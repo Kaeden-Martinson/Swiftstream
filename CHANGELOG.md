@@ -4,9 +4,14 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-18
+
+- Maintenance release: the release process publishes to npm on its own. No changes to the app or the command line.
+
 ## [0.1.3] - 2026-10-18
 
 - Rearrange tabs by dragging them. Tab bar from the keyboard: after clicking a tab (or tabbing to it), the arrow keys and Home and End switch tabs, Delete closes the focused one, and Enter, Escape or typing in a terminal tab goes back into it. Ctrl+PageUp and Ctrl+PageDown switch tabs from anywhere.
+- The tab bar shows a focus outline when you move through it with the Tab key, and none when you switch tabs with the arrow keys.
 
 ## [0.1.2] - 2026-10-17
 

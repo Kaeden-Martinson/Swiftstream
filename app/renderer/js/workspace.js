@@ -65,6 +65,43 @@ function renderTabs() {
   );
 }
 
+// ---------- the tab bar from the keyboard ----------
+// Tab moves between its buttons; on a tab, Left/Right (Home/End) switch to the previous/next
+// (first/last) one and keep the focus on the tab bar, Enter/Space open it, Delete or Ctrl+W closes it.
+
+/** The tabs in order: Servers, each open tab, Settings. */
+const tabButtons = () => [$('tab-home'), ...$('open-tabs').querySelectorAll('.srv-tab'), $('tab-settings')];
+const tabTarget = (button) => (button.id === 'tab-home' ? null : button.id === 'tab-settings' ? SETTINGS_PAGE : state.tabs[[...$('open-tabs').children].indexOf(button)]);
+
+/** Switch to the tab at `index` and keep the keyboard on the tab bar. */
+function focusTabAt(index) {
+  const buttons = tabButtons();
+  const i = Math.max(0, Math.min(buttons.length - 1, index));
+  activate(tabTarget(buttons[i]));
+  // The tabs are redrawn, and a terminal takes the focus when it's shown: put it back afterwards.
+  requestAnimationFrame(() => requestAnimationFrame(() => tabButtons()[i]?.focus()));
+}
+
+document.querySelector('.tabbar').addEventListener('keydown', (e) => {
+  const buttons = tabButtons();
+  const index = buttons.indexOf(document.activeElement);
+  if (index < 0) return;
+  const move = { ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: buttons.length - 1 }[e.key];
+  if (move !== undefined && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    focusTabAt((move + buttons.length) % buttons.length);
+    return;
+  }
+  const closing = e.key === 'Delete' || (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'w');
+  const id = tabTarget(document.activeElement);
+  if (closing && id && id !== SETTINGS_PAGE) {
+    e.preventDefault();
+    e.stopPropagation(); // the focused tab, not necessarily the one that's shown
+    closeTab(id);
+    requestAnimationFrame(() => tabButtons()[Math.min(index, tabButtons().length - 2)]?.focus());
+  }
+});
+
 function tabTitle(session) {
   const host = hostByName(session.host);
   const info = state.info.get(session.host);
@@ -142,12 +179,14 @@ $('tab-home').addEventListener('click', () => activate(null));
 // Ctrl+Tab / Ctrl+Shift+Tab cycle through the servers home and open tabs; Ctrl+W closes a tab.
 window.addEventListener('keydown', (e) => {
   // Ctrl+Tab on every system; Ctrl+T / Ctrl+W are Cmd+T / Cmd+W on a Mac.
-  if (!(e.ctrlKey && e.key === 'Tab') && !modKey(e)) return;
-  if (e.key === 'Tab') {
+  if (!(e.ctrlKey && ['Tab', 'PageUp', 'PageDown'].includes(e.key)) && !modKey(e)) return;
+  // Ctrl+Tab / Ctrl+Shift+Tab, and Ctrl+PageDown / Ctrl+PageUp like a browser: next and previous tab.
+  if (e.key === 'Tab' || (e.ctrlKey && (e.key === 'PageDown' || e.key === 'PageUp'))) {
     e.preventDefault();
+    const back = e.key === 'PageUp' || (e.key === 'Tab' && e.shiftKey);
     const order = [null, ...state.tabs];
     const i = order.indexOf(state.page === 'session' ? state.activeTab : null);
-    activate(order[(i + (e.shiftKey ? -1 : 1) + order.length) % order.length]);
+    activate(order[(i + (back ? -1 : 1) + order.length) % order.length]);
   } else if (e.key.toLowerCase() === 'w' && e.shiftKey && activeSession()?.panes?.length > 1) {
     e.preventDefault();
     closePane(activeSession()); // Ctrl+Shift+W: just the terminal you're in

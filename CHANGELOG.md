@@ -4,6 +4,8 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+- Tab bar from the keyboard: arrow keys (and Home and End) switch tabs, Delete closes the focused one, and Ctrl+PageUp and Ctrl+PageDown switch tabs from anywhere.
+
 ## [0.1.2] - 2026-10-17
 
 - Installing the desktop app puts the `swiftstream` (and `sws`) command on your PATH, with no Node.js needed.

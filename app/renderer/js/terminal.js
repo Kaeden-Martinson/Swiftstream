@@ -197,6 +197,7 @@ function onTerminalKey(session, pane, e) {
   }
   if (IS_MAC && e.metaKey && e.code === 'KeyV') return pasteInto(pane), false;
   if (cmd('KeyF')) return openSearch(), false;
+  if (e.ctrlKey && (e.key === 'PageUp' || e.key === 'PageDown')) return false; // switching tabs (workspace.js)
   if (cmd('KeyD')) return splitPane(session), false;
   // Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on a Mac): text size, for every terminal.
   if (modKey(e) && !e.shiftKey && !e.altKey && (key === '=' || key === '+' || key === '-' || key === '0')) {

@@ -134,9 +134,12 @@ jobs:
             exit 1
           fi
 
+  # Runs for a release tag, or after the npm-check branch's check passes: then it publishes this
+  # commit's version if npm doesn't have it yet (to catch up a release whose publish failed).
   npm:
     name: Publish to npm
-    needs: check
+    needs: [check, npm-check]
+    if: always() && (needs.check.result == 'success' || needs.npm-check.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -155,8 +158,14 @@ jobs:
       - name: Publish
         run: |
           set -o pipefail
+          version=$(node -p "require('./package.json').version")
+          if npm view "swiftstream@$version" version >/dev/null 2>&1; then
+            echo "::notice title=Already on npm::swiftstream@$version is published; nothing to do"
+            exit 0
+          fi
           if ! npm publish --access public --provenance 2>&1 | tee publish.log; then
             # As an annotation too: readable without signing in.
             echo "::error title=npm publish failed::$(grep -v '^ *at ' publish.log | grep -iv 'notice' | tail -25 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
             exit 1
           fi
+          echo "::notice title=Published::swiftstream@$version is on npm, with provenance"

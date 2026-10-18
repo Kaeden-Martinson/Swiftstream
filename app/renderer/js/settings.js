@@ -147,7 +147,7 @@ $('set-show-key').addEventListener('click', async () => {
   $('key-fingerprint').textContent = id.fingerprint;
   $('key-dialog').showModal();
 });
-$('tab-settings').addEventListener('click', () => activate(SETTINGS_PAGE));
+$('tab-settings').addEventListener('click', () => (activate(SETTINGS_PAGE), refocusTab(SETTINGS_PAGE)));
 
 // Help: diagnostics for bug reports
 $('diag-copy').addEventListener('click', async () => {

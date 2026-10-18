@@ -507,3 +507,9 @@ option { background: var(--panel); color: var(--text); }
 
 /* macOS: the window buttons sit at the left of the tab bar */
 .platform-darwin .tabbar { padding-left: 84px; }
+
+/* Rearranging tabs: a line where the dragged tab will land */
+.open-tabs { -webkit-app-region: no-drag; }
+.srv-tab.dragging { position: relative; z-index: 2; background: var(--panel-2); border-color: var(--line-strong); box-shadow: 0 6px 18px var(--shadow); transition: none; cursor: grabbing; }
+.srv-tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.srv-tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }

@@ -47,7 +47,12 @@ function renderTabs() {
         el('span', { className: 'tab-name', textContent: tabLabel(session) }),
         close,
       );
-      tab.addEventListener('click', (e) => (e.target.closest('.tab-close') ? closeTab(id) : activate(id)));
+      tab.addEventListener('click', (e) => {
+        if (tabDragJustEnded) return; // the click that ends a drag doesn't switch tabs
+        if (e.target.closest('.tab-close')) closeTab(id);
+        else activate(id), refocusTab(id);
+      });
+      tab.addEventListener('pointerdown', (e) => e.button === 0 && !e.target.closest('.tab-close') && startTabDrag(e, tab, id));
       tab.addEventListener('auxclick', (e) => e.button === 1 && closeTab(id)); // middle-click closes
       onContextMenu(tab, () => [
         { label: 'New terminal', icon: 'terminal', run: () => openSession(session.host, 'terminal') },
@@ -73,13 +78,28 @@ function renderTabs() {
 const tabButtons = () => [$('tab-home'), ...$('open-tabs').querySelectorAll('.srv-tab'), $('tab-settings')];
 const tabTarget = (button) => (button.id === 'tab-home' ? null : button.id === 'tab-settings' ? SETTINGS_PAGE : state.tabs[[...$('open-tabs').children].indexOf(button)]);
 
+/**
+ * Put the keyboard back on the tab for `target` (a tab id, null for Servers, or Settings): the tabs are
+ * redrawn when one is chosen, and a terminal takes the focus when it's shown.
+ */
+function refocusTab(target) {
+  requestAnimationFrame(() => requestAnimationFrame(() => tabButtons().find((b) => tabTarget(b) === target)?.focus()));
+}
+
 /** Switch to the tab at `index` and keep the keyboard on the tab bar. */
 function focusTabAt(index) {
   const buttons = tabButtons();
-  const i = Math.max(0, Math.min(buttons.length - 1, index));
-  activate(tabTarget(buttons[i]));
-  // The tabs are redrawn, and a terminal takes the focus when it's shown: put it back afterwards.
-  requestAnimationFrame(() => requestAnimationFrame(() => tabButtons()[i]?.focus()));
+  const target = tabTarget(buttons[Math.max(0, Math.min(buttons.length - 1, index))]);
+  activate(target);
+  refocusTab(target);
+}
+
+/** From the tab bar into what the tab shows: its terminal, its file list, or the server search. */
+function focusTabContent() {
+  const session = activeSession();
+  if (state.page === 'home') return $('search').focus();
+  if (session?.kind === 'terminal') return session.term?.xterm.focus();
+  if (session?.kind === 'files') part(lastPaneSide, 'list')?.focus();
 }
 
 document.querySelector('.tabbar').addEventListener('keydown', (e) => {
@@ -92,6 +112,19 @@ document.querySelector('.tabbar').addEventListener('keydown', (e) => {
     focusTabAt((move + buttons.length) % buttons.length);
     return;
   }
+  // Enter on the tab that's showing, or Escape: into its content. Typing on a terminal's tab types in it.
+  const showing = tabTarget(document.activeElement) === (state.page === 'session' ? state.activeTab : state.page === 'home' ? null : SETTINGS_PAGE);
+  if ((e.key === 'Enter' && showing) || e.key === 'Escape') {
+    e.preventDefault();
+    return focusTabContent();
+  }
+  const pane = showing && activeSession()?.kind === 'terminal' ? activeSession().term : null;
+  if (pane && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    pane.xterm.focus();
+    onTerminalInput(pane, e.key);
+    return;
+  }
   const closing = e.key === 'Delete' || (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 'w');
   const id = tabTarget(document.activeElement);
   if (closing && id && id !== SETTINGS_PAGE) {
@@ -101,6 +134,68 @@ document.querySelector('.tabbar').addEventListener('keydown', (e) => {
     requestAnimationFrame(() => tabButtons()[Math.min(index, tabButtons().length - 2)]?.focus());
   }
 });
+
+// ---------- rearranging tabs by dragging ----------
+// Like a browser's tabs: press on a tab and move sideways, it follows the pointer, and the others
+// make room. Pointer events rather than drag-and-drop, so there's no ghost image and no OS drag.
+
+let tabDragJustEnded = false;
+
+function startTabDrag(down, tab, id) {
+  const startX = down.clientX;
+  let dragging = false;
+  let to = state.tabs.indexOf(id);
+  const others = () => [...$('open-tabs').querySelectorAll('.srv-tab')].filter((t) => t !== tab);
+
+  const move = (e) => {
+    const dx = e.clientX - startX;
+    if (!dragging) {
+      if (Math.abs(dx) < 6) return;
+      dragging = true;
+      tab.setPointerCapture(e.pointerId);
+      tab.classList.add('dragging');
+    }
+    tab.style.transform = `translateX(${dx}px)`;
+    // The new place: before the first other tab whose middle is right of the pointer.
+    const rest = others();
+    const i = rest.findIndex((t) => {
+      const r = t.getBoundingClientRect();
+      return e.clientX < r.left + r.width / 2;
+    });
+    to = i < 0 ? rest.length : i;
+    clearTabDropMark();
+    const mark = rest[Math.min(to, rest.length - 1)];
+    mark?.classList.add(to < rest.length ? 'drop-before' : 'drop-after');
+  };
+
+  const end = () => {
+    tab.removeEventListener('pointermove', move);
+    tab.removeEventListener('pointerup', end);
+    tab.removeEventListener('pointercancel', end);
+    if (!dragging) return;
+    tab.classList.remove('dragging');
+    tab.style.transform = '';
+    clearTabDropMark();
+    tabDragJustEnded = true;
+    setTimeout(() => (tabDragJustEnded = false));
+    const from = state.tabs.indexOf(id);
+    if (from !== to && from >= 0) {
+      state.tabs.splice(from, 1);
+      state.tabs.splice(to, 0, id);
+      persistTabs();
+      renderTabs();
+    }
+    refocusTab(state.page === 'session' ? state.activeTab : state.page === 'home' ? null : SETTINGS_PAGE);
+  };
+
+  tab.addEventListener('pointermove', move);
+  tab.addEventListener('pointerup', end);
+  tab.addEventListener('pointercancel', end);
+}
+
+function clearTabDropMark() {
+  for (const t of $('open-tabs').querySelectorAll('.drop-before, .drop-after')) t.classList.remove('drop-before', 'drop-after');
+}
 
 function tabTitle(session) {
   const host = hostByName(session.host);
@@ -174,7 +269,7 @@ function showSession(session) {
   else openFilesFor(session);
 }
 
-$('tab-home').addEventListener('click', () => activate(null));
+$('tab-home').addEventListener('click', () => (activate(null), refocusTab(null)));
 
 // Ctrl+Tab / Ctrl+Shift+Tab cycle through the servers home and open tabs; Ctrl+W closes a tab.
 window.addEventListener('keydown', (e) => {

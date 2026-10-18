@@ -4,7 +4,7 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
-- Tab bar from the keyboard: arrow keys (and Home and End) switch tabs, Delete closes the focused one, and Ctrl+PageUp and Ctrl+PageDown switch tabs from anywhere.
+- Rearrange tabs by dragging them. Tab bar from the keyboard: after clicking a tab (or tabbing to it), the arrow keys and Home and End switch tabs, Delete closes the focused one, and Enter, Escape or typing in a terminal tab goes back into it. Ctrl+PageUp and Ctrl+PageDown switch tabs from anywhere.
 
 ## [0.1.2] - 2026-10-17
 

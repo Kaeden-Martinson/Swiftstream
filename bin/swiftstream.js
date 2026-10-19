@@ -22,6 +22,7 @@ import { VERSION, isOlderVersion } from '../src/version.js';
 import { selfCommand } from '../src/self.js';
 import { openDesktopApp } from '../src/desktop.js';
 import { readSshConfig, sshConfigHost, sshTarget } from '../src/sshconfig.js';
+import { describeReason, repairReason } from '../src/repair.js';
 
 const OPTIONS = {
   port: { type: 'string' },
@@ -67,7 +68,7 @@ function resumableOnCancel() {
 }
 
 async function withClient(name, opts, fn) {
-  const conn = await client(name, opts);
+  const conn = await connectOrRepair(name, opts);
   try {
     return await fn(conn);
   } finally {
@@ -249,10 +250,8 @@ installs itself on the server, and saves it under --name (default: the host's sh
       need(target, this.usage);
       const name = await resolveOrSetUp(target, opts);
       await updateServerIfOlder(name, opts);
-      await withServerRunning(name, opts, async () => {
-        await withClient(name, {}, async (conn) => {
-          process.exitCode = await openShell(conn);
-        });
+      await withClient(name, opts, async (conn) => {
+        process.exitCode = await openShell(conn);
       });
     },
   },
@@ -463,9 +462,14 @@ async function updateServerIfOlder(name, opts) {
   if (!host?.ssh) return;
   let remote;
   try {
-    remote = await withClient(name, {}, (conn) => conn.request('GET', '/v1/info', { timeout: 8000 }));
+    const conn = await client(name, {}); // no repair here: connecting right after does that once
+    try {
+      remote = await conn.request('GET', '/v1/info', { timeout: 8000 });
+    } finally {
+      conn.close();
+    }
   } catch {
-    return; // not reachable: withServerRunning deals with that
+    return; // not reachable: connecting repairs it (connectOrRepair)
   }
   if (!remote?.version || !isOlderVersion(remote.version, VERSION)) return;
   info(`${name} runs Swiftstream ${remote.version}; updating it to ${VERSION}`);
@@ -479,16 +483,35 @@ async function updateServerIfOlder(name, opts) {
 }
 
 /** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
-async function withServerRunning(name, opts, fn) {
+/**
+ * Log in over HTTPS (quick). If that fails in a way SSH can fix and the server has an SSH login, log
+ * in over SSH, find what's wrong, fix it, say what it was, and connect again. At a keyboard the SSH
+ * password may be asked if this computer's key isn't accepted; scripts use the key only.
+ */
+async function connectOrRepair(name, opts = {}) {
   try {
-    return await fn();
+    return await client(name, opts);
   } catch (err) {
+    const reason = repairReason(err);
     const host = loadHosts()[name];
-    if (err.code !== 'ECONNREFUSED' || !host?.ssh || !process.stdin.isTTY) throw err;
-    warn(`Swiftstream isn't running on ${name}.`);
-    if (!(await confirm(`Start it again by logging in to ${host.ssh}?`, true))) throw err;
-    await deployCommand(name, host.ssh, { ...opts, 'ssh-port': opts['ssh-port'] || host.sshPort }, { quiet: true });
-    return fn();
+    if (!reason || !host?.ssh) throw err;
+    warn(`${describeReason(reason, name)}. Checking it over SSH (${host.ssh})…`);
+    const { repairs } = await deployHost({
+      name,
+      target: host.ssh,
+      sshPort: opts['ssh-port'] || host.sshPort,
+      port: Number(new URL(host.url).port) || DEFAULT_PORT,
+      restart: reason === 'unresponsive',
+      askPassword: (attempt) =>
+        process.stdin.isTTY && attempt < 3 ? askSecret(attempt ? 'Wrong password, try again:' : `Password for ${host.ssh}:`) : Promise.reject(new UserError("this computer's SSH key wasn't accepted")),
+      confirmHostKey: async () => false, // a server we've connected to before: its SSH key must be known
+      onStep: (text) => info(`${text}…`),
+    });
+    // On stderr, like the other progress lines: stdout may be piped (swiftstream exec … > file).
+    const fixed = (text) => console.error(`${c.green('✓')} ${text}`);
+    if (repairs.length) for (const fix of repairs) fixed(fix);
+    else fixed(`${name} looked fine over SSH and answers again`);
+    return client(name, opts);
   }
 }
 

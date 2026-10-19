@@ -360,6 +360,7 @@ api.term.onExit((id, code) => {
 api.term.onError((id, err) => termFor(id)?.xterm.write(`\r\n\x1b[31m${err.message}\x1b[0m\r\n`));
 
 new ResizeObserver(() => {
+  if (typeof activeSession !== 'function') return; // the first call comes before workspace.js has loaded
   const session = activeSession();
   if (session?.panes && !$('terminal-pane').hidden) session.panes.forEach(fitTerminal);
 }).observe($('terminal-pane'));

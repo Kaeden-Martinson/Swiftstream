@@ -19,6 +19,9 @@ On AWS, Google Cloud, Azure, OVH and similar, also allow TCP 7022 in the server'
 **"SSH host key has changed"**
 The server's SSH identity is different from the first time you connected. That's expected after reinstalling a server, and suspicious otherwise. If you reinstalled it, remove its line from `~/.swiftstream/ssh_known_hosts.json` and set it up again.
 
+**"Can't reach SSH on … from here"**
+Swiftstream repairs a server over SSH when HTTPS fails, and this network doesn't let SSH through (school, work and public Wi-Fi often block it). Swiftstream itself only needs HTTPS: once the server is running it works here. To set it up or repair it, use another network, such as a phone hotspot.
+
 **It asks for a password even though I use an SSH key**
 Swiftstream tries your SSH agent, the key named by `IdentityFile` in `~/.ssh/config`, and `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa`. A key with a passphrase is asked about at the keyboard (in the app, a dialog). If none of them is accepted by the server, the account's password is next. On Windows, start the **OpenSSH Authentication Agent** service to use keys loaded with `ssh-add`.
 

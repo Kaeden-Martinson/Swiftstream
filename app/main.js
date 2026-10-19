@@ -17,6 +17,7 @@ import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js
 import { walk } from './core/util.js';
 import { VERSION, isOlderVersion } from './core/version.js';
 import { readSshConfig, sshTarget } from './core/sshconfig.js';
+import { describeReason, repairReason } from './core/repair.js';
 import { createLog } from './log.js';
 
 const dirname = import.meta.dirname;
@@ -67,15 +68,32 @@ function dropClient(name) {
 }
 
 /** Run fn with a logged-in client, logging in once more if the session went stale (e.g. server restarted). */
+/**
+ * Run fn with a logged-in client for a server: HTTPS first, which is quick. If that fails in a way SSH
+ * can fix and the server has an SSH login, repair it over SSH (see repairServer) and try once more.
+ */
 async function withClient(name, fn) {
+  const attempt = async () => fn(await getClient(name));
+  let err;
   try {
-    return await fn(await getClient(name));
-  } catch (err) {
-    const stale = err.status === 401 || ['ECONNRESET', 'ECONNREFUSED', 'EPIPE'].includes(err.code);
-    if (!stale) throw err;
-    dropClient(name);
-    return fn(await getClient(name));
+    return await attempt();
+  } catch (e) {
+    err = e;
   }
+  // A cached session may simply have expired, or its socket closed: log in again first.
+  if ((err.status === 401 && !/not authorized/.test(err.message)) || ['ECONNRESET', 'ECONNREFUSED', 'EPIPE'].includes(err.code)) {
+    dropClient(name);
+    try {
+      return await attempt();
+    } catch (e) {
+      err = e;
+    }
+  }
+  const reason = repairReason(err);
+  if (!reason || !loadHosts()[name]?.ssh || settings().autoHeal === false) throw err;
+  await repairServer(name, reason, err);
+  dropClient(name);
+  return attempt();
 }
 
 /** IPC handler that returns { ok, value } or { ok: false, error: { message, hint, action } }. */
@@ -604,17 +622,54 @@ async function checkHealth(name) {
     maybeUpdateServer(name, info);
     return true;
   } catch (err) {
-    const host = loadHosts()[name];
-    const stopped = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message);
     send('health', { name, status: 'down', error: explainForApp(err, name) });
     noteHealth(name, 'down', { message: err.message, code: err.code });
-    if (stopped && host?.ssh && settings().autoHeal) heal(name);
-    return false;
+    return false; // withClient has already tried an SSH repair where one could help
   }
 }
 
-/** Log in with this computer's key (authorized at setup) and start Swiftstream again. Never asks for a password. */
-const heal = (name) => redeployUnattended(name, { cooldown: HEAL_COOLDOWN_MS, statuses: ['healing', 'healed', 'heal-failed'] });
+/**
+ * Repair a server over SSH after HTTPS failed for `reason` (see core/repair.js): log in with this
+ * computer's key (authorized at setup; never asks for a password), find what's wrong and fix it.
+ * One repair per server at a time (everyone waiting shares it); after a failed one, the original
+ * error stands for two minutes instead of trying SSH again on every click.
+ */
+const repairing = new Map(); // name -> the repair in progress
+const lastRepairFailure = new Map(); // name -> when the last repair failed
+function repairServer(name, reason, original) {
+  if (repairing.has(name)) return repairing.get(name);
+  if (Date.now() - (lastRepairFailure.get(name) || 0) < HEAL_COOLDOWN_MS) return Promise.reject(original || new Error(describeReason(reason, name)));
+  const job = (async () => {
+    send('health', { name, status: 'healing', reason, what: describeReason(reason, name) });
+    log.info(`server ${name} repairing over SSH`, { reason });
+    try {
+      const host = loadHosts()[name];
+      dropClient(name);
+      const { info, repairs } = await deployHost({
+        name,
+        target: host.ssh,
+        sshPort: host.sshPort,
+        port: savedPort(name),
+        restart: reason === 'unresponsive',
+        bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
+        confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
+      });
+      lastRepairFailure.delete(name);
+      send('health', { name, status: 'healed', info, repairs });
+      log.info(`server ${name} repaired`, { repairs });
+      return { info, repairs };
+    } catch (err) {
+      lastRepairFailure.set(name, Date.now());
+      send('health', { name, status: 'heal-failed', error: explainForApp(err, name) });
+      log.warn(`server ${name} repair failed`, { message: err.message, code: err.code });
+      throw err;
+    } finally {
+      repairing.delete(name);
+    }
+  })();
+  repairing.set(name, job);
+  return job;
+}
 
 // ---- servers running an older Swiftstream than this app are updated the same way ----------------
 // Updating restarts the server, which ends its open terminals, so it waits until none are open.
@@ -677,8 +732,8 @@ function scheduleHealth() {
 }
 handle('health:check', (name) => checkHealth(name));
 handle('health:heal', async (name) => {
-  healing.delete(name); // a manual request skips the cooldown
-  await heal(name);
+  lastRepairFailure.delete(name); // a manual request skips the cooldown
+  await repairServer(name, 'stopped');
 });
 
 // ---- terminals --------------------------------------------------------------

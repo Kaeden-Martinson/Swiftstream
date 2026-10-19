@@ -1,7 +1,7 @@
 'use strict';
 // Server health from the main process: status dots, banners, and automatic restarts (see main.js).
 
-api.health.onEvent(({ name, status, info, error, from, to }) => {
+api.health.onEvent(({ name, status, info, error, from, to, what, repairs }) => {
   if (!hostByName(name)) return;
   // Updating a server to this app's version (see maybeUpdateServer in main.js).
   if (status === 'updating') {
@@ -38,11 +38,12 @@ api.health.onEvent(({ name, status, info, error, from, to }) => {
   }
   paintStatus(name);
 
+  // Repairs over SSH (repairServer in main.js): say what looked wrong, then what was fixed.
   if (status === 'healing') {
-    toast(`Restarting Swiftstream on ${name}…`);
-    if (activeSession()?.host === name) showBanner({ message: `Swiftstream stopped on ${name}. Restarting it over SSH…`, hint: 'Your terminal reconnects when it is back.' });
+    toast(`${what || `Can't reach Swiftstream on ${name}`}. Checking it over SSH…`);
+    if (activeSession()?.host === name) showBanner({ message: `${what || `Can't reach Swiftstream on ${name}`}. Checking it over SSH…`, hint: 'Your terminal reconnects when it is fixed.' });
   } else if (status === 'healed') {
-    toast(`Swiftstream is running again on ${name}`);
+    toast(repairs?.length ? `${name}: ${repairs.join('. ')}.` : `${name} is reachable again.`);
     afterRecovered(name);
   } else if (status === 'up' && wasHealing) {
     afterRecovered(name);

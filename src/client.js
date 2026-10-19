@@ -23,8 +23,10 @@ export class SwiftClient {
   }
 
   async login(identity) {
+    let current = false; // servers that report a version know the new key name
     const attempt = async (publicKey) => {
-      const { nonce } = await this.request('POST', '/v1/auth/challenge');
+      const { nonce, version } = await this.request('POST', '/v1/auth/challenge');
+      current = !!version;
       const signature = sign(identity.privateKey, authMessage(nonce, this.host.fingerprint));
       return this.request('POST', '/v1/auth/verify', { body: { publicKey, nonce, signature } });
     };
@@ -33,7 +35,7 @@ export class SwiftClient {
       result = await attempt(identity.publicKeyString);
     } catch (err) {
       // A server from before the rename only recognises the old key type name; same key, old label.
-      if (err.status !== 401 || !/not authorized/.test(err.message)) throw err;
+      if (err.status !== 401 || !/not authorized/.test(err.message) || current) throw err;
       result = await attempt(identity.publicKeyString.replace(/^swiftstream-ed25519 /, 'swiftssh-ed25519 '));
     }
     this.token = result.token;

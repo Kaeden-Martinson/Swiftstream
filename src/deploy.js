@@ -41,6 +41,7 @@ export async function deployOverSsh({
   onStep = () => {},
   bundlePath,
   identityFile, // a private key to try first, e.g. IdentityFile from ~/.ssh/config
+  restart = false, // stop a running Swiftstream first (it was there but not answering)
 }) {
   if (!/^swift(stream|ssh)-ed25519 [A-Za-z0-9+/=]+$/.test(publicKey)) throw new Error('Invalid public key');
   const { username, host } = parseTarget(target);
@@ -50,12 +51,17 @@ export async function deployOverSsh({
   onStep(`Connecting to ${host}`);
   const ownKey = identityKey ? sshPrivateKeyPem(identityKey) : null;
   const session = await sshConnect({ username, host, port: Number(sshPort) || 22, password, askPassword, askPassphrase, confirmHostKey, ownKey, identityFile });
+  // What was found and fixed, in plain words, for "what was wrong" messages after a repair.
+  const repairs = [];
   try {
     onStep('Checking the server');
     const facts = await probe(session);
 
     let node = facts.node;
-    if (!node) node = await installNode(session, facts, onStep, session.loginPassword);
+    if (!node) {
+      node = await installNode(session, facts, onStep, session.loginPassword);
+      if (facts.bundle_sha) repairs.push('Node.js was missing, so it was installed again');
+    }
 
     // A server set up before the rename runs the old program on the same port: stop it first.
     if (facts.legacy) {
@@ -65,6 +71,7 @@ export async function deployOverSsh({
     }
 
     if (facts.bundle_sha !== bundleSha) {
+      repairs.push(facts.bundle_sha ? 'Swiftstream was a different version, so it was updated' : "Swiftstream's program file was missing, so it was installed again");
       onStep('Uploading Swiftstream');
       // A different version may be running from an older upload: stop it so the new one starts.
       if (facts.bundle_sha) await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
@@ -76,18 +83,30 @@ export async function deployOverSsh({
       if (up.code !== 0) throw new UserError(`Uploading Swiftstream to ${host} failed.`, up.stderr.trim());
     }
 
+    // Was this computer still allowed in? (The start below authorizes it either way.)
+    const keyData = publicKey.split(' ')[1];
+    const known = await run(session, sh(`grep -qF "${keyData}" "$HOME/.swiftstream/authorized_keys" 2>/dev/null`)).catch(() => ({ code: 1 }));
+    if (known.code !== 0 && facts.bundle_sha) repairs.push("This computer's key wasn't accepted, so it was authorized again");
+
+    if (restart && facts.running && facts.bundle_sha === bundleSha) {
+      onStep('Restarting Swiftstream');
+      await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
+      repairs.push("Swiftstream was running but not answering, so it was restarted");
+    } else if (!facts.running && facts.bundle_sha === bundleSha) {
+      repairs.push('Swiftstream had stopped, so it was started again');
+    }
     onStep('Starting Swiftstream');
     const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey} ${computerLabel()}"`));
     const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
     if (!line) {
       throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');
     }
-    const ready = { ...parseReadyLine(line), host };
+    const ready = { ...parseReadyLine(line), host, repairs };
 
     if (identityKey && authorizeSsh) {
       // Let this computer log in over SSH with its Swiftstream key, so a stopped server can be
       // restarted automatically without asking for a password. Same access the key already has.
-      const comment = `swiftstream@${os.hostname().replace(/[^w.-]/g, '') || 'computer'}`;
+      const comment = `swiftstream@${os.hostname().replace(/[^\w.-]/g, '') || 'computer'}`;
       const line = sshPublicKeyLine(identityKey, comment);
       const keyData = line.split(' ')[1];
       await run(session, sh(`umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && (grep -qF "${keyData}" "$HOME/.ssh/authorized_keys" || printf '%s\n' "${line}" >> "$HOME/.ssh/authorized_keys")`)).catch(() => {});
@@ -145,9 +164,10 @@ function checkReachable(host, port) {
       socket.destroy();
       if (err.code === 'ECONNREFUSED') reject(new UserError(`No SSH server is answering on ${host}:${port}.`, 'Check the address and SSH port.'));
       else if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') reject(new UserError(`Can't find a machine called "${host}".`, 'Check the spelling of the address.'));
-      else reject(new UserError(`Connecting to ${host}:${port} timed out.`, 'Check the address, the SSH port, and that the server is online.'));
+      // A firewall that drops SSH looks like this too: say so, since it's common on school and work Wi-Fi.
+      else reject(new UserError(`Can't reach SSH on ${host}:${port} from here.`, `The server may be offline, or this network blocks SSH (common on school, work and public Wi-Fi). Swiftstream itself uses HTTPS, so it can still work here once it's running; to set it up or repair it over SSH, use another network such as a phone hotspot.`));
     };
-    socket.setTimeout(15_000, () => fail({ code: 'ETIMEDOUT' }));
+    socket.setTimeout(10_000, () => fail({ code: 'ETIMEDOUT' }));
     socket.once('error', fail);
     socket.once('connect', () => {
       socket.destroy();
@@ -320,6 +340,7 @@ for pm in xbps-install apt-get dnf yum apk pacman zypper brew; do command -v $pm
 echo "uid=$(id -u)"
 command -v sudo >/dev/null 2>&1 && echo "sudo=1"
 if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; fi
+if [ -f "$D/server.pid" ]; then p=$(tr -dc '0-9,' < "$D/server.pid" | cut -d, -f1); [ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo "running=1"; fi
 if [ -f "$D/bin/swiftstream.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftstream.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftstream.cjs") | cut -d' ' -f1)"; fi
 `;
 

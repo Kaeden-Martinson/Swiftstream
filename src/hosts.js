@@ -111,6 +111,8 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
   // Restarting a saved server keeps its group, and its address if the identity is unchanged
   // (the user may have edited it, e.g. to a DNS name).
   const sameServer = existing && existing.fingerprint === ready.fingerprint;
+  // A new certificate is only taken from the SSH login, whose host key was already known and checked.
+  if (existing && !sameServer) ready.repairs?.push("The server's certificate had changed; the new one was checked over SSH and saved");
   const host = {
     ...(existing || {}),
     url: sameServer ? existing.url : `https://${address}:${ready.port}`,
@@ -125,7 +127,7 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
   let client;
   try {
     client = await connectClient(host, identity);
-    return { host, info: await client.request('GET', '/v1/info'), autostart: ready.autostart };
+    return { host, info: await client.request('GET', '/v1/info'), autostart: ready.autostart, repairs: ready.repairs || [] };
   } catch (err) {
     if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message)) {
       throw new UserError(

@@ -62,6 +62,12 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       entry = { windowStart: now, failures: 0, challenges: 0 };
       authAttempts.set(ip, entry);
     }
+    // authorized_keys changed since the failures (e.g. a repair authorized this computer again over SSH):
+    // they were about the old list, so start over. Only someone with access to the server can do this.
+    if (entry.failures && (fs.statSync(paths.authorizedKeys, { throwIfNoEntry: false })?.mtimeMs || 0) > entry.lastFailure) {
+      entry.failures = 0;
+      entry.challenges = 0;
+    }
     if (entry.failures >= AUTH_MAX_FAILURES || entry.challenges >= AUTH_MAX_CHALLENGES) {
       throw new HttpError(429, 'too many login attempts; try again in a few minutes');
     }
@@ -110,13 +116,14 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       if (challenges.size >= MAX_PENDING_CHALLENGES) throw new HttpError(503, 'server busy; try again shortly');
       const nonce = crypto.randomBytes(32).toString('base64url');
       challenges.set(nonce, Date.now() + CHALLENGE_TTL_MS);
-      return { nonce, fingerprint };
+      return { nonce, fingerprint, version: VERSION };
     },
 
     'POST /v1/auth/verify': async (req) => {
       const { ip, entry } = authBudget(req);
       const fail = (message) => {
         entry.failures++;
+        entry.lastFailure = Date.now();
         log('auth failed', ip, message);
         return new HttpError(401, message);
       };

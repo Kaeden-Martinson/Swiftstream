@@ -143,14 +143,46 @@ try {
   assert.equal(fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8'), authorized); // not added twice
   console.log('ok  restart over SSH with no password, no re-upload');
 
-  // A stopped server comes back with the same key login (what the app's auto-restart does).
+  // Reconnecting: HTTPS fails, so the CLI logs in over SSH with this computer's key (no password),
+  // finds what's wrong, fixes it, says what it was, and the command goes ahead.
+  const remoteDir = path.join(users.tester.home, '.swiftstream');
+  const startRemote = () =>
+    spawnSync(process.execPath, [path.join(remoteDir, 'bin', 'swiftstream.cjs'), 'serve', '--daemon', '--port', String(swiftPort)], {
+      env: { ...process.env, SWIFTSTREAM_HOME: remoteDir, NO_COLOR: '1' },
+    });
+
   stopRemote(users.tester);
-  r = await run(['exec', 'box', '--', 'echo', 'down']);
-  assert.notEqual(r.code, 0);
-  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' });
-  r = await ok(['exec', 'box', '--', 'echo', 'back-up']);
-  assert.match(r.out, /back-up/);
-  console.log('ok  stopped server restarted with the key, no password');
+  r = await ok(['exec', 'box', '--', 'echo', 'after-stop']);
+  assert.match(r.out, /after-stop/);
+  assert.match(r.err, /Swiftstream isn't running on box\. Checking it over SSH/);
+  assert.match(r.err, /Swiftstream had stopped, so it was started again/);
+  console.log('ok  repair: stopped server started again with the key, no password');
+
+  stopRemote(users.tester);
+  fs.rmSync(path.join(remoteDir, 'bin', 'swiftstream.cjs'));
+  r = await ok(['exec', 'box', '--', 'echo', 'after-delete']);
+  assert.match(r.out, /after-delete/);
+  assert.match(r.err, /program file was missing, so it was installed again/);
+  console.log('ok  repair: deleted program reinstalled');
+
+  const keys = path.join(remoteDir, 'authorized_keys');
+  fs.writeFileSync(keys, ''); // this computer no longer allowed (Swiftstream keeps running)
+  r = await ok(['exec', 'box', '--', 'echo', 'after-revoke']);
+  assert.match(r.out, /after-revoke/);
+  assert.match(r.err, /didn't accept this computer's key/);
+  assert.match(r.err, /key wasn't accepted, so it was authorized again/);
+  console.log('ok  repair: revoked key authorized again over SSH');
+
+  stopRemote(users.tester);
+  for (const f of ['server_cert.pem', 'server_key.pem']) fs.rmSync(path.join(remoteDir, f));
+  startRemote(); // a new certificate, as after reinstalling Swiftstream
+  r = await ok(['exec', 'box', '--', 'echo', 'after-new-cert']);
+  assert.match(r.out, /after-new-cert/);
+  assert.match(r.err, /has a different certificate than before/);
+  assert.match(r.err, /certificate had changed; the new one was checked over SSH and saved/);
+  r = await ok(['exec', 'box', '--', 'echo', 'quiet-now']);
+  assert.doesNotMatch(r.err, /Checking it over SSH/); // the new certificate was saved
+  console.log('ok  repair: new certificate picked up through the SSH login');
 
   // A server running an older Swiftstream is updated by "connect" before the shell opens, with the key.
   const bundle = fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'), 'utf8');

@@ -4,6 +4,10 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+- Reconnecting repairs the server: HTTPS is tried first, and if it fails in a way SSH can fix, the app and the command line log in over SSH with this computer's key, find what's wrong and fix it, then carry on. That covers a stopped or stuck Swiftstream, a deleted program file, a removed Node.js, an older version, this computer's key no longer being accepted, and a new certificate (taken only from the SSH login, whose host key is already known). It says what it fixed. This happens when opening a terminal, a folder or a transfer, and on every command line command, not just in the background check.
+- Where SSH is blocked (common on school and work Wi-Fi), a repair gives up after 10 seconds and says so, instead of hanging.
+- A computer that was just authorized again on a server is no longer locked out by earlier failed logins.
+
 ## [0.1.4] - 2026-10-18
 
 - Maintenance release: the release process publishes to npm on its own. No changes to the app or the command line.

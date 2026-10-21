@@ -2,6 +2,10 @@
 // fix, the app and the CLI log in over SSH, look at what's wrong (see deployOverSsh) and fix just that:
 // restart a stopped or stuck Swiftstream, reinstall missing files or Node.js, update an older version,
 // authorize this computer's key again, or pick up a new certificate from the authenticated SSH login.
+// Before logging in over SSH for a server that didn't answer, its public health check is asked once
+// more (checkServerHealth): a passing hiccup reconnects normally instead.
+
+import { UserError } from './errors.js';
 
 const UNREACHABLE = ['ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'];
 
@@ -24,12 +28,31 @@ export function repairReason(err) {
   return null;
 }
 
-/** "Swiftstream isn't running on prod": what the HTTPS failure looked like, in plain words. */
+/** "Can't reach Swiftstream on prod": what the HTTPS failure looked like, in plain words. */
 export function describeReason(reason, name) {
   return {
-    stopped: `Swiftstream isn't running on ${name}`,
+    stopped: `Can't reach Swiftstream on ${name}`,
     unresponsive: `Swiftstream on ${name} isn't answering`,
     key: `${name} didn't accept this computer's key`,
     certificate: `${name} has a different certificate than before`,
   }[reason];
+}
+
+/** True for the reasons where the server didn't answer at all, so its health check is worth asking. */
+export const silentReason = (reason) => reason === 'stopped' || reason === 'unresponsive';
+
+/**
+ * Neither Swiftstream's port nor SSH answers. Swiftstream may be running fine and this network blocks
+ * both (school and work Wi-Fi often refuse every port but the web's), so say that rather than "stopped".
+ */
+export function unreachableFromHere(name, host) {
+  const ports = [host.url, host.webUrl].filter(Boolean).map((u) => new URL(u).port || 443);
+  const sshPort = host.sshPort || 22;
+  const err = new UserError(
+    `Can't reach ${name} from this network: Swiftstream (port ${ports.join(' or ')}) and SSH (port ${sshPort}) both don't answer.`,
+    `If ${name} works from other networks, this one blocks those ports (common on school, work and public Wi-Fi) and Swiftstream is probably still running. A phone hotspot or VPN gets through.` +
+      (host.webUrl ? '' : ` Setting ${name} up again from another network also opens port 443, which most networks allow.`),
+  );
+  err.code = 'NETWORK_BLOCKED';
+  return err;
 }

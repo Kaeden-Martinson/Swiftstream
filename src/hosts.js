@@ -46,7 +46,11 @@ export function updateHost(name, changes) {
   if (newName !== name && hosts[newName]) throw new UserError(`A server called "${newName}" already exists.`, 'Pick a different name.');
 
   const updated = { ...host };
-  if (changes.address !== undefined) updated.url = normalizeUrl(changes.address).origin;
+  if (changes.address !== undefined) {
+    updated.url = normalizeUrl(changes.address).origin;
+    // The web port's address follows the main one to the new hostname.
+    if (updated.webUrl) updated.webUrl = `https://${new URL(updated.url).hostname}:${new URL(updated.webUrl).port || 443}`;
+  }
   if (changes.group !== undefined) {
     const group = String(changes.group || '').trim();
     if (group.length > 40) throw new UserError('Group names can be at most 40 characters.');
@@ -120,6 +124,9 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
     cert: ready.cert,
     ssh: target,
   };
+  // The second address on the web port, tried when the main one is blocked (see connectClient).
+  if (ready.webPort) host.webUrl = `https://${new URL(host.url).hostname}:${ready.webPort}`;
+  else delete host.webUrl;
   if (sshPort && Number(sshPort) !== 22) host.sshPort = Number(sshPort);
   else delete host.sshPort;
   saveHost(name, host);
@@ -127,11 +134,11 @@ export async function deployHost({ name, target, sshPort, port = DEFAULT_PORT, .
   let client;
   try {
     client = await connectClient(host, identity);
-    return { host, info: await client.request('GET', '/v1/info'), autostart: ready.autostart, repairs: ready.repairs || [] };
+    return { host, info: await client.request('GET', '/v1/info'), autostart: ready.autostart, repairs: ready.repairs || [], webNote: ready.webNote || null };
   } catch (err) {
     if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH'].includes(err.code) || /timed out/.test(err.message)) {
       throw new UserError(
-        `Swiftstream is running on ${ready.host}, but port ${ready.port} can't be reached from here.`,
+        `Swiftstream is running on ${ready.host}, but port ${ready.port}${ready.webPort ? ` (or ${ready.webPort})` : ''} can't be reached from here.`,
         `Open ${ready.port}/tcp in the server's firewall (for example "sudo ufw allow ${ready.port}/tcp", or your cloud provider's security group), then run "swiftstream connect ${name}".`,
       );
     }

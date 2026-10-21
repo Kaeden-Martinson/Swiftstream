@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import https from 'node:https';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -43,7 +44,12 @@ function log(...args) {
   console.log(new Date().toISOString(), ...args);
 }
 
-export async function startServer({ port, host = '0.0.0.0', root = os.homedir() }) {
+/**
+ * webPort: a second port, normally 443, for networks that only let web ports out (school and work
+ * Wi-Fi). Same server, same certificate. If it can't be opened (taken by a web server, or below 1024
+ * without permission), Swiftstream runs on `port` alone and says why in `webPortError`.
+ */
+export async function startServer({ port, host = '0.0.0.0', root = os.homedir(), webPort = 0 }) {
   const { key, cert, fingerprint } = loadOrCreateServerCert();
   const pty = await loadPty();
   ensureDir(paths.uploads);
@@ -52,6 +58,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
   const sessions = new Map(); // token -> { expires, key }
   const uploads = new Map(); // id -> upload state (mirrored to disk so uploads survive restarts)
   const authAttempts = new Map(); // ip -> { windowStart, failures, challenges }
+  const web = { port: null, error: null, listener: null }; // the second (web) port, once it's open
 
   /** Brute-force protection: count challenges and failed logins per client IP. */
   const authBudget = (req) => {
@@ -111,6 +118,9 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     writeJson(path.join(paths.uploads, `${id}.json`), { ...state, received: [...state.received] });
 
   const routes = {
+    // Public and cheap: lets a client tell "Swiftstream is up" from "can't reach it" before trying SSH.
+    'GET /swiftstream-health': async () => ({ ok: true, version: VERSION }),
+
     'POST /v1/auth/challenge': async (req) => {
       authBudget(req).entry.challenges++;
       if (challenges.size >= MAX_PENDING_CHALLENGES) throw new HttpError(503, 'server busy; try again shortly');
@@ -146,7 +156,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
 
     'GET /v1/info': async (req) => {
       authenticate(req);
-      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty };
+      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty, webPort: web.port, webPortError: web.error };
     },
 
     'GET /v1/stat': async (req, url) => {
@@ -486,11 +496,29 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
     server.listen(port, host, resolve);
   });
 
+  // The web port hands each connection to the same HTTPS server.
+  if (Number(webPort) && Number(webPort) !== server.address().port) {
+    const listener = net.createServer((socket) => server.emit('connection', socket));
+    await new Promise((resolve) => {
+      listener.once('error', (err) => {
+        web.error = err.code || err.message;
+        log('web port', webPort, 'not available:', web.error);
+        resolve();
+      });
+      listener.listen(Number(webPort), host, () => {
+        web.port = listener.address().port;
+        web.listener = listener;
+        resolve();
+      });
+    });
+  }
+
   /** Stop accepting connections, end open shells, and resolve once the server is closed. */
   const close = (graceMs = 5000) =>
     new Promise((resolve) => {
       clearInterval(sweeper);
       clearInterval(janitor);
+      web.listener?.close();
       for (const ws of wss.clients) ws.close(1001, 'server shutting down');
       server.close(() => resolve());
       server.closeIdleConnections?.();
@@ -500,7 +528,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir() 
       }, graceMs).unref();
     });
 
-  return { server, fingerprint, cert, port: server.address().port, close };
+  return { server, fingerprint, cert, port: server.address().port, webPort: web.port, webPortError: web.error, close };
 }
 
 let scriptFlavor; // 'linux' (util-linux/busybox), 'bsd' (macOS/BSD), or null

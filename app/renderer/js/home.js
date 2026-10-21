@@ -262,7 +262,8 @@ addForm.addEventListener('submit', async (e) => {
       setAddBusy(`Connecting to ${target}…`);
       const password = f.password.value;
       f.password.value = ''; // don't keep it in the form
-      await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null, password, identityFile: addIdentityFile }));
+      const info = await call(api.hosts.deploy({ name, target, sshPort: f.sshPort.value.trim() || null, password, identityFile: addIdentityFile }));
+      if (info?.webNote) toast(info.webNote.split('\n')[0]); // e.g. port 443 needs permission there
       if (f.group.value.trim()) await call(api.hosts.update(name, { group: f.group.value.trim() }));
       $('add-dialog').close();
       $('search').value = '';

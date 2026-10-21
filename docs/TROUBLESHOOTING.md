@@ -16,8 +16,14 @@ sudo ufw allow 7022/tcp
 
 On AWS, Google Cloud, Azure, OVH and similar, also allow TCP 7022 in the server's network rules.
 
+**Setup says "Port 443 … is used by another program" or "needs permission"**
+Swiftstream also listens on 443 so networks that block 7022 (school, work and public Wi-Fi) can still reach it. If a web server already uses 443 there, Swiftstream keeps to 7022: it works everywhere except on those networks. For "needs permission", run the `sudo setcap …` line setup printed on the server, then connect again: it lets Swiftstream's own copy of Node.js (nothing else) use ports below 1024. Then the next setup or update restarts Swiftstream with port 443 added.
+
 **"SSH host key has changed"**
 The server's SSH identity is different from the first time you connected. That's expected after reinstalling a server, and suspicious otherwise. If you reinstalled it, remove its line from `~/.swiftstream/ssh_known_hosts.json` and set it up again.
+
+**"Can't reach … from this network: Swiftstream (port 7022) and SSH (port 22) both don't answer"**
+Swiftstream is probably running fine, and this network blocks both ports. Servers set up with 0.1.6 or newer also listen on 443, which these networks allow, so this only happens where 443 couldn't be added (see above), or before a server was updated. School, work and public Wi-Fi often allow only web ports (80 and 443), and some refuse other ports outright, which looks the same as a stopped server. To check whether Swiftstream answers, open `https://<server>:7022/swiftstream-health` in a browser (accept the certificate warning): `{"ok":true,...}` means it's up and the network was the problem. A phone hotspot or VPN gets through.
 
 **"Can't reach SSH on … from here"**
 Swiftstream repairs a server over SSH when HTTPS fails, and this network doesn't let SSH through (school, work and public Wi-Fi often block it). Swiftstream itself only needs HTTPS: once the server is running it works here. To set it up or repair it, use another network, such as a phone hotspot.

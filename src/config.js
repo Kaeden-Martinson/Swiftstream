@@ -32,6 +32,9 @@ export const paths = {
 };
 
 export const DEFAULT_PORT = 7022;
+// Also served on 443 where possible: networks that only let web traffic out (school, work) allow it.
+// SWIFTSTREAM_WEB_PORT changes it (0 for none), e.g. for tests, which must not take the real 443.
+export const DEFAULT_WEB_PORT = process.env.SWIFTSTREAM_WEB_PORT !== undefined ? Number(process.env.SWIFTSTREAM_WEB_PORT) || 0 : 443;
 
 export function ensureDir(dir = HOME_DIR) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

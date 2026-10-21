@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import updater from 'electron-updater';
-import { connectClient } from './core/client.js';
+import { checkServerHealth, connectClient } from './core/client.js';
 import { loadHosts, paths, readJson, writeJson } from './core/config.js';
 import { explainError } from './core/errors.js';
 import { deployHost, getHostOrExplain, probeHost, removeHost, saveProbedHost, updateHost, validateHostName } from './core/hosts.js';
@@ -17,7 +17,7 @@ import { pull, pullDir, push, pushDir, remoteBasename } from './core/transfer.js
 import { walk } from './core/util.js';
 import { VERSION, isOlderVersion } from './core/version.js';
 import { readSshConfig, sshTarget } from './core/sshconfig.js';
-import { describeReason, repairReason } from './core/repair.js';
+import { describeReason, repairReason, silentReason, unreachableFromHere } from './core/repair.js';
 import { createLog } from './log.js';
 
 const dirname = import.meta.dirname;
@@ -57,6 +57,14 @@ async function getClient(name) {
   let client = clients.get(name);
   if (!client) {
     client = await connectClient(getHostOrExplain(name), loadOrCreateIdentity());
+    // Logging in tells us the server's version: an older one is updated right away (and says so),
+    // then we log in to the new one. If the update fails, the old version keeps serving.
+    const update = maybeUpdateServer(name, { version: client.serverVersion });
+    if (update) {
+      client.close();
+      await update;
+      client = await connectClient(getHostOrExplain(name), loadOrCreateIdentity());
+    }
     clients.set(name, client);
   }
   return client;
@@ -73,6 +81,7 @@ function dropClient(name) {
  * can fix and the server has an SSH login, repair it over SSH (see repairServer) and try once more.
  */
 async function withClient(name, fn) {
+  await updates.get(name); // an update restarts the server: wait for it rather than fail and repair
   const attempt = async () => fn(await getClient(name));
   let err;
   try {
@@ -90,7 +99,14 @@ async function withClient(name, fn) {
     }
   }
   const reason = repairReason(err);
-  if (!reason || !loadHosts()[name]?.ssh || settings().autoHeal === false) throw err;
+  const host = loadHosts()[name];
+  if (!reason || !host?.ssh || settings().autoHeal === false) throw err;
+  // Nothing answered: ask the public health check once more before SSH. If Swiftstream answers now,
+  // the failure was passing (Wi-Fi changing, an idle socket closed) and a normal login is enough.
+  if (silentReason(reason) && (await checkServerHealth(host)).up) {
+    dropClient(name);
+    return attempt();
+  }
   await repairServer(name, reason, err);
   dropClient(name);
   return attempt();
@@ -182,7 +198,7 @@ ipcMain.on('ask:answer', (_e, id, value) => {
 
 handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile }) => {
   dropClient(name);
-  const { info } = await deployHost({
+  const { info, webNote } = await deployHost({
     name,
     target,
     sshPort: sshPort || undefined,
@@ -196,7 +212,8 @@ handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile })
     confirmHostKey: async () => true,
     onStep: (text) => send('deploy:step', { name, text }),
   });
-  return info;
+  if (webNote) log.info(`server ${name} web port`, { note: webNote });
+  return { ...info, webNote };
 });
 
 handle('hosts:update', (name, changes) => {
@@ -635,10 +652,11 @@ async function checkHealth(name) {
  * error stands for two minutes instead of trying SSH again on every click.
  */
 const repairing = new Map(); // name -> the repair in progress
-const lastRepairFailure = new Map(); // name -> when the last repair failed
+const lastRepairFailure = new Map(); // name -> { at, err } for the last failed repair
 function repairServer(name, reason, original) {
   if (repairing.has(name)) return repairing.get(name);
-  if (Date.now() - (lastRepairFailure.get(name) || 0) < HEAL_COOLDOWN_MS) return Promise.reject(original || new Error(describeReason(reason, name)));
+  const failed = lastRepairFailure.get(name);
+  if (failed && Date.now() - failed.at < HEAL_COOLDOWN_MS) return Promise.reject(failed.err || original || new Error(describeReason(reason, name)));
   const job = (async () => {
     send('health', { name, status: 'healing', reason, what: describeReason(reason, name) });
     log.info(`server ${name} repairing over SSH`, { reason });
@@ -658,8 +676,10 @@ function repairServer(name, reason, original) {
       send('health', { name, status: 'healed', info, repairs });
       log.info(`server ${name} repaired`, { repairs });
       return { info, repairs };
-    } catch (err) {
-      lastRepairFailure.set(name, Date.now());
+    } catch (e) {
+      // Swiftstream's port and SSH both silent: most likely this network, not the server.
+      const err = e.code === 'SSH_UNREACHABLE' && silentReason(reason) ? unreachableFromHere(name, loadHosts()[name]) : e;
+      lastRepairFailure.set(name, { at: Date.now(), err });
       send('health', { name, status: 'heal-failed', error: explainForApp(err, name) });
       log.warn(`server ${name} repair failed`, { message: err.message, code: err.code });
       throw err;
@@ -675,21 +695,31 @@ function repairServer(name, reason, original) {
 // Updating restarts the server, which ends its open terminals, so it waits until none are open.
 const UPDATE_RETRY_MS = 30 * 60 * 1000;
 const updateNoticeShown = new Set();
+const updates = new Map(); // name -> the update in progress (resolves when done, failed or not)
+/** Start updating a server older than this app, unless its terminals are open. Returns the update, if started. */
 function maybeUpdateServer(name, info) {
   const host = loadHosts()[name];
-  if (!host?.ssh || !info?.version || !isOlderVersion(info.version, VERSION) || settings().updateServers === false) return;
+  if (!host?.ssh || !info?.version || !isOlderVersion(info.version, VERSION) || settings().updateServers === false) return undefined;
+  if (updates.has(name)) return updates.get(name);
   const terminalOpen = [...terminals.values()].some((t) => t.host === name);
   if (!terminalOpen) {
-    redeployUnattended(name, { cooldown: UPDATE_RETRY_MS, statuses: ['updating', 'updated', 'update-failed'], extra: { from: info.version, to: VERSION } });
+    return redeployUnattended(name, { cooldown: UPDATE_RETRY_MS, statuses: ['updating', 'updated', 'update-failed'], extra: { from: info.version, to: VERSION } });
   } else if (!updateNoticeShown.has(name)) {
     updateNoticeShown.add(name);
     send('health', { name, status: 'outdated', from: info.version, to: VERSION });
   }
+  return undefined;
 }
 
-async function redeployUnattended(name, { cooldown, statuses: [busy, done, failed], extra = {} }) {
+function redeployUnattended(name, opts) {
   const st = healing.get(name) || { busy: false, last: 0 };
-  if (st.busy || Date.now() - st.last < cooldown) return;
+  if (st.busy || Date.now() - st.last < opts.cooldown) return undefined;
+  const job = redeploy(name, st, opts).finally(() => updates.delete(name));
+  updates.set(name, job);
+  return job;
+}
+
+async function redeploy(name, st, { statuses: [busy, done, failed], extra = {} }) {
   st.busy = true;
   st.last = Date.now();
   healing.set(name, st);
@@ -706,9 +736,17 @@ async function redeployUnattended(name, { cooldown, statuses: [busy, done, faile
       bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
       confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
     });
+    if (extra.to && info?.version && isOlderVersion(info.version, extra.to)) {
+      // The upload worked but the server still reports the old version: this app's server program is
+      // older than the app (a stale build). Retrying every half hour wouldn't change that.
+      const stale = new Error(`it still reports ${info.version} after updating (this app carries an older server program)`);
+      stale.stale = true;
+      throw stale;
+    }
     send('health', { name, status: done, info, ...extra });
     log.info(`server ${name} ${done}`, { version: info?.version });
   } catch (err) {
+    if (err.stale) st.last = Infinity; // only a new app build fixes it: don't retry until then
     send('health', { name, status: failed, error: explainForApp(err, name), ...extra });
     log.warn(`server ${name} ${failed}`, { message: err.message, code: err.code });
   } finally {

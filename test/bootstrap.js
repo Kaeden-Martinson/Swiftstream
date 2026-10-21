@@ -9,8 +9,11 @@ import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
+import { checkServerHealth } from '../src/client.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// Servers set up here don't take the real port 443 (the web port test below picks a free one).
+process.env.SWIFTSTREAM_WEB_PORT ??= '0';
 // test/package.js points this at a copy installed from the packed tarball.
 const cli = process.env.SWIFTSTREAM_TEST_CLI || path.join(root, 'bin', 'swiftstream.js');
 const work = path.join(root, '.test-home', 'bootstrap');
@@ -143,6 +146,36 @@ try {
   assert.equal(fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8'), authorized); // not added twice
   console.log('ok  restart over SSH with no password, no re-upload');
 
+  // The web port (443 on real servers; a free port here): setup restarts Swiftstream to add it and
+  // saves its address. When the main port is blocked, the client connects through it instead.
+  const webPort = await freePort();
+  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '', env: { SWIFTSTREAM_WEB_PORT: String(webPort) } });
+  assert.match(r.err, new RegExp(`Restarting Swiftstream to add port ${webPort}`));
+  assert.match(r.err, new RegExp(`Also on port ${webPort}, for networks that block ${swiftPort}`));
+  const withWeb = fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8');
+  assert.equal(JSON.parse(withWeb).box.webUrl, `https://127.0.0.1:${webPort}`);
+  const blocked = JSON.parse(withWeb);
+  blocked.box.url = `https://127.0.0.1:${await freePort()}`; // nothing there: refused, like 7022 at school
+  fs.writeFileSync(path.join(clientHome, 'hosts.json'), JSON.stringify(blocked));
+  r = await ok(['exec', 'box', '--', 'echo', 'through-the-web-port']);
+  fs.writeFileSync(path.join(clientHome, 'hosts.json'), withWeb);
+  assert.match(r.out, /through-the-web-port/);
+  assert.doesNotMatch(r.err, /Checking it over SSH/);
+  assert.equal((await checkServerHealth(blocked.box)).up, true);
+  console.log('ok  web port: added by setup, used when the main port is blocked');
+
+  // Web port taken by another program (a web server on 443): Swiftstream runs on its main port and says so.
+  const taken = await freePort();
+  const squatter = net.createServer().listen(taken, '0.0.0.0');
+  stopRemote(users.tester);
+  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '', env: { SWIFTSTREAM_WEB_PORT: String(taken) } });
+  squatter.close();
+  assert.match(r.err, new RegExp(`Port ${taken} on 127\\.0\\.0\\.1 is used by another program`));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8')).box.webUrl, undefined);
+  r = await ok(['exec', 'box', '--', 'echo', 'main-port-only']);
+  assert.match(r.out, /main-port-only/);
+  console.log('ok  web port taken: runs on the main port and says why');
+
   // Reconnecting: HTTPS fails, so the CLI logs in over SSH with this computer's key (no password),
   // finds what's wrong, fixes it, says what it was, and the command goes ahead.
   const remoteDir = path.join(users.tester.home, '.swiftstream');
@@ -151,10 +184,30 @@ try {
       env: { ...process.env, SWIFTSTREAM_HOME: remoteDir, NO_COLOR: '1' },
     });
 
+  // The public health check: answers without a login while Swiftstream runs, silent once it stops.
+  const savedBox = JSON.parse(fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8')).box;
+  const health = await checkServerHealth(savedBox);
+  assert.equal(health.up, true);
+  assert.equal(health.version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   stopRemote(users.tester);
+  assert.equal((await checkServerHealth(savedBox)).up, false);
+  console.log('ok  health check answers without a login, and not once stopped');
+
+  // Swiftstream's port and SSH both silent (as on Wi-Fi that blocks them): say it's probably the network.
+  const hostsFile = path.join(clientHome, 'hosts.json');
+  const savedHosts = fs.readFileSync(hostsFile, 'utf8');
+  const unroutable = JSON.parse(savedHosts);
+  unroutable.box.ssh = 'tester@10.255.255.1'; // nothing answers there: times out, or "network unreachable"
+  fs.writeFileSync(hostsFile, JSON.stringify(unroutable));
+  r = await run(['exec', 'box', '--', 'echo', 'never']);
+  fs.writeFileSync(hostsFile, savedHosts);
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /Can't reach box from this network: Swiftstream \(port \d+( or \d+)?\) and SSH \(port \d+\) both don't answer/);
+  console.log('ok  Swiftstream and SSH both unreachable: blames the network, not the server');
+
   r = await ok(['exec', 'box', '--', 'echo', 'after-stop']);
   assert.match(r.out, /after-stop/);
-  assert.match(r.err, /Swiftstream isn't running on box\. Checking it over SSH/);
+  assert.match(r.err, /Can't reach Swiftstream on box\. Checking it over SSH/);
   assert.match(r.err, /Swiftstream had stopped, so it was started again/);
   console.log('ok  repair: stopped server started again with the key, no password');
 
@@ -184,7 +237,7 @@ try {
   assert.doesNotMatch(r.err, /Checking it over SSH/); // the new certificate was saved
   console.log('ok  repair: new certificate picked up through the SSH login');
 
-  // A server running an older Swiftstream is updated by "connect" before the shell opens, with the key.
+  // A server running an older Swiftstream is updated as soon as a command logs in to it, with the key.
   const bundle = fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'), 'utf8');
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   const oldBundle = path.join(work, 'old-swiftstream.cjs');
@@ -192,13 +245,14 @@ try {
   await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { env: { SWIFTSTREAM_BUNDLE: oldBundle } });
   const remoteBundle = path.join(users.tester.home, '.swiftstream', 'bin', 'swiftstream.cjs');
   assert.match(fs.readFileSync(remoteBundle, 'utf8'), /"0\.0\.1"/);
-  r = await ok(['connect', 'box'], { input: 'echo after-update\nexit\n' });
+  r = await ok(['exec', 'box', '--', 'echo', 'after-update']);
   assert.ok(r.err.includes(`box runs Swiftstream 0.0.1; updating it to ${version}`), r.err);
+  assert.ok(r.err.includes(`Updated Swiftstream on box from 0.0.1 to ${version}`), r.err);
   assert.match(r.out, /after-update/);
   assert.ok(fs.readFileSync(remoteBundle).equals(fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'))), 'server was not updated');
   r = await ok(['connect', 'box'], { input: 'exit\n' });
   assert.doesNotMatch(r.err, /updating it/);
-  console.log('ok  older server updated by connect, with the key');
+  console.log('ok  older server updated on login, with the key, and says which version');
 
   // The standalone executable uploads the copy embedded in itself.
   if (fs.existsSync(exe)) {

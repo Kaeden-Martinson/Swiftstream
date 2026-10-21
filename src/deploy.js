@@ -4,7 +4,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import ssh2 from 'ssh2';
-import { DEFAULT_PORT, paths, readJson, writeJson } from './config.js';
+import { DEFAULT_PORT, DEFAULT_WEB_PORT, paths, readJson, writeJson } from './config.js';
 import { UserError } from './errors.js';
 import { computerLabel, sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
 import { loadServerBundle } from './self.js';
@@ -31,6 +31,7 @@ export async function deployOverSsh({
   target,
   sshPort = 22,
   port = DEFAULT_PORT,
+  webPort = DEFAULT_WEB_PORT, // a second port for networks that only allow web ports; 0 for none
   publicKey,
   identityKey, // this computer's private key: tried for SSH login, and authorized for SSH so restarts need no password
   authorizeSsh = true,
@@ -88,6 +89,11 @@ export async function deployOverSsh({
     const known = await run(session, sh(`grep -qF "${keyData}" "$HOME/.swiftstream/authorized_keys" 2>/dev/null`)).catch(() => ({ code: 1 }));
     if (known.code !== 0 && facts.bundle_sha) repairs.push("This computer's key wasn't accepted, so it was authorized again");
 
+    // The web port (443): ports below 1024 need root, or permission for Swiftstream's own Node.js.
+    webPort = Number(webPort) || 0;
+    if (webPort === Number(port)) webPort = 0;
+    const webAccess = webPort ? await allowWebPort(session, facts, node, webPort, onStep) : { ok: false };
+
     if (restart && facts.running && facts.bundle_sha === bundleSha) {
       onStep('Restarting Swiftstream');
       await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
@@ -96,12 +102,23 @@ export async function deployOverSsh({
       repairs.push('Swiftstream had stopped, so it was started again');
     }
     onStep('Starting Swiftstream');
-    const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} --authorize "${publicKey} ${computerLabel()}"`));
-    const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
-    if (!line) {
-      throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');
+    const startServe = async () => {
+      const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webPort ? ` --web-port ${webPort}` : ''} --authorize "${publicKey} ${computerLabel()}"`));
+      const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
+      if (!line) {
+        throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');
+      }
+      return { ...parseReadyLine(line), host, repairs };
+    };
+    let ready = await startServe();
+    // Already running from a start that didn't ask for the web port (no error means it never tried),
+    // and it may open it now: start it again, once, with the port.
+    if (webPort && webAccess.ok && !ready.webPort && !ready.webPortError) {
+      onStep(`Restarting Swiftstream to add port ${webPort}`);
+      await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
+      ready = await startServe();
     }
-    const ready = { ...parseReadyLine(line), host, repairs };
+    ready.webNote = webPort && !ready.webPort ? webPortNote(webPort, ready.webPortError, webAccess, host) : null;
 
     if (identityKey && authorizeSsh) {
       // Let this computer log in over SSH with its Swiftstream key, so a stopped server can be
@@ -113,7 +130,7 @@ export async function deployOverSsh({
     }
 
     // Start again after a reboot, where the server allows a user crontab.
-    const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)} >/dev/null 2>&1`;
+    const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webPort ? ` --web-port ${webPort}` : ''} >/dev/null 2>&1`;
     const cron = await run(
       session,
       sh(`command -v crontab >/dev/null 2>&1 || exit 3; (crontab -l 2>/dev/null | grep -v -e "swiftstream.cjs\" serve" -e "swiftssh.cjs\" serve"; echo '${cronLine.replace(/'/g, `'"'"'`)}') | crontab -`),
@@ -162,10 +179,18 @@ function checkReachable(host, port) {
     const socket = net.connect({ host, port });
     const fail = (err) => {
       socket.destroy();
-      if (err.code === 'ECONNREFUSED') reject(new UserError(`No SSH server is answering on ${host}:${port}.`, 'Check the address and SSH port.'));
+      if (err.code === 'ECONNREFUSED') {
+        const refused = new UserError(`No SSH server is answering on ${host}:${port}.`, 'Check the address and SSH port.');
+        refused.code = 'SSH_UNREACHABLE'; // some networks refuse blocked ports rather than drop them
+        reject(refused);
+      }
       else if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') reject(new UserError(`Can't find a machine called "${host}".`, 'Check the spelling of the address.'));
       // A firewall that drops SSH looks like this too: say so, since it's common on school and work Wi-Fi.
-      else reject(new UserError(`Can't reach SSH on ${host}:${port} from here.`, `The server may be offline, or this network blocks SSH (common on school, work and public Wi-Fi). Swiftstream itself uses HTTPS, so it can still work here once it's running; to set it up or repair it over SSH, use another network such as a phone hotspot.`));
+      else {
+        const unreachable = new UserError(`Can't reach SSH on ${host}:${port} from here.`, `The server may be offline, or this network blocks SSH (common on school, work and public Wi-Fi). Swiftstream itself uses HTTPS, so it can still work here once it's running; to set it up or repair it over SSH, use another network such as a phone hotspot.`);
+        unreachable.code = 'SSH_UNREACHABLE';
+        reject(unreachable);
+      }
     };
     socket.setTimeout(10_000, () => fail({ code: 'ETIMEDOUT' }));
     socket.once('error', fail);
@@ -341,6 +366,7 @@ echo "uid=$(id -u)"
 command -v sudo >/dev/null 2>&1 && echo "sudo=1"
 if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; fi
 if [ -f "$D/server.pid" ]; then p=$(tr -dc '0-9,' < "$D/server.pid" | cut -d, -f1); [ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo "running=1"; fi
+echo "unpriv_from=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null)"
 if [ -f "$D/bin/swiftstream.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftstream.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftstream.cjs") | cut -d' ' -f1)"; fi
 `;
 
@@ -417,9 +443,42 @@ async function installNode(conn, facts, onStep, sudoPassword) {
   );
 }
 
+/**
+ * Make sure Swiftstream may open the web port. Root can; Linux keeps ports below 1024 for root unless
+ * lowered by a sysctl. Otherwise Swiftstream's own Node.js (in ~/.swiftstream/runtime, used by nothing
+ * else) gets the one permission it needs, cap_net_bind_service, with sudo: passwordless, or the SSH
+ * login password when we have it. The system's Node.js is left alone.
+ * { ok: true } or { ok: false, command } with what to run on the server to allow it.
+ */
+async function allowWebPort(conn, facts, node, webPort, onStep) {
+  if (facts.uid === '0' || facts.os !== 'Linux' || webPort >= 1024) return { ok: true };
+  if (Number(facts.unpriv_from) && webPort >= Number(facts.unpriv_from)) return { ok: true };
+  if (!/\/\.(swiftstream|swiftssh)\/runtime\//.test(node)) return { ok: false, systemNode: true };
+  const real = (await run(conn, sh(`readlink -f "${node}"`))).stdout.trim() || node;
+  const command = `setcap cap_net_bind_service=+ep "${real}"`;
+  const has = await run(conn, sh(`PATH="$PATH:/sbin:/usr/sbin" getcap "${real}"`)).catch(() => ({ stdout: '' }));
+  if (/cap_net_bind_service/.test(has.stdout)) return { ok: true };
+  if (facts.sudo) {
+    onStep(`Allowing Swiftstream to use port ${webPort}`);
+    const res = conn.loginPassword
+      ? await run(conn, `sudo -S -p '' ${sh(command)}`, { stdin: `${conn.loginPassword}\n` })
+      : await run(conn, `sudo -n ${sh(command)}`);
+    if (res.code === 0) return { ok: true };
+  }
+  return { ok: false, command: `sudo ${command}` };
+}
+
+/** Why the web port isn't in use, and how to add it, for setup's output. */
+function webPortNote(webPort, error, access, host) {
+  if (error === 'EADDRINUSE') return `Port ${webPort} on ${host} is used by another program (a web server?), so Swiftstream isn't on it. Networks that block other ports can't reach Swiftstream there.`;
+  if (access.command) return `Port ${webPort} needs permission on ${host}. To allow it, run there:\n  ${access.command}\nthen connect again.`;
+  if (access.systemNode) return `Port ${webPort} needs root on ${host}, and Swiftstream runs on the system's Node.js there, so it only uses its main port.`;
+  return `Swiftstream couldn't open port ${webPort} on ${host}${error ? ` (${error})` : ''}.`;
+}
+
 /** One machine-readable line the server prints when it is up, so deploy can pin its cert. */
-export function readyLine({ port, fingerprint, cert }) {
-  return READY_PREFIX + Buffer.from(JSON.stringify({ port, fingerprint, cert })).toString('base64');
+export function readyLine({ port, fingerprint, cert, webPort = null, webPortError = null }) {
+  return READY_PREFIX + Buffer.from(JSON.stringify({ port, fingerprint, cert, webPort, webPortError })).toString('base64');
 }
 
 export function parseReadyLine(line) {

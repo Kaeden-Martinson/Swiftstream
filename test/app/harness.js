@@ -1,6 +1,8 @@
 // Drives the real desktop app against a throwaway server, for the tests in this folder:
 // an in-process SSH server (like test/bootstrap.js), Swiftstream set up on it with the CLI,
 // and the app started in its development screenshot mode with a test script.
+// Servers set up by the app tests don't take the real port 443.
+process.env.SWIFTSTREAM_WEB_PORT ??= '0';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';

@@ -12,9 +12,9 @@ export class HttpError extends Error {
 
 /** Authenticated HTTPS client for one pinned swiftstream host. */
 export class SwiftClient {
-  constructor(host, { parallel = 8 } = {}) {
+  constructor(host, { parallel = 8, url = host.url } = {}) {
     this.host = host;
-    this.base = new URL(host.url);
+    this.base = new URL(url);
     this.tls = pinnedTlsOptions(host);
     // One keep-alive socket per parallel worker: separate TCP streams so a lost packet
     // only stalls the chunk on that stream instead of the whole transfer.
@@ -22,11 +22,12 @@ export class SwiftClient {
     this.token = null;
   }
 
-  async login(identity) {
+  async login(identity, { timeout } = {}) {
     let current = false; // servers that report a version know the new key name
     const attempt = async (publicKey) => {
-      const { nonce, version } = await this.request('POST', '/v1/auth/challenge');
+      const { nonce, version } = await this.request('POST', '/v1/auth/challenge', { timeout });
       current = !!version;
+      this.serverVersion = version || null;
       const signature = sign(identity.privateKey, authMessage(nonce, this.host.fingerprint));
       return this.request('POST', '/v1/auth/verify', { body: { publicKey, nonce, signature } });
     };
@@ -104,6 +105,67 @@ export class SwiftClient {
   }
 }
 
+// Errors where the address itself didn't answer, so the server's other address is worth a try.
+const UNANSWERED = ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'];
+const unanswered = (err) => UNANSWERED.includes(err?.code) || /timed out|socket hang up/i.test(err?.message || '');
+
+// The address that last worked for each server (main URL -> URL), tried first next time.
+const lastWorking = new Map();
+
+/** A server's addresses: the main one, then the web port's (443) if it has one; the one that last worked first. */
+export function serverUrls(host) {
+  const urls = [host.url, host.webUrl].filter(Boolean);
+  const last = lastWorking.get(host.url);
+  return last && urls.includes(last) ? [last, ...urls.filter((u) => u !== last)] : urls;
+}
+
+/**
+ * Log in to a server. When it has a second address on the web port and the first one doesn't answer
+ * (a network that blocks it, like school Wi-Fi blocking 7022), the other one is tried. If neither
+ * works, the main address's error is the one reported.
+ */
 export async function connectClient(host, identity, opts) {
-  return new SwiftClient(host, opts).login(identity);
+  const urls = serverUrls(host);
+  let mainErr;
+  let otherErr;
+  for (const url of urls) {
+    const client = new SwiftClient(host, { ...opts, url });
+    try {
+      // With another address to fall back to, don't wait the full minute on a silent one.
+      await client.login(identity, urls.length > 1 ? { timeout: 10_000 } : {});
+      lastWorking.set(host.url, url);
+      return client;
+    } catch (err) {
+      client.close();
+      // The main address speaks for the server; the web port's might since have gone to another program.
+      if (url === host.url) {
+        if (!unanswered(err)) throw err;
+        mainErr = err;
+      } else otherErr ??= err;
+    }
+  }
+  lastWorking.delete(host.url);
+  throw mainErr || otherErr;
+}
+
+/**
+ * Ask a server's public health check (GET /swiftstream-health, no login) whether Swiftstream answers.
+ * { up: true, version } when it does; servers from before the check answer 404, which counts as up.
+ * { up: false, error } when nothing answers in time: stopped, or this network can't reach the port.
+ */
+export async function checkServerHealth(host, { timeout = 5000 } = {}) {
+  let error;
+  for (const url of serverUrls(host)) {
+    const probe = new SwiftClient(host, { parallel: 1, url });
+    try {
+      const res = await probe.request('GET', '/swiftstream-health', { timeout });
+      return { up: true, version: res?.version || null, url };
+    } catch (err) {
+      if (err instanceof HttpError) return { up: true, version: null, url };
+      error ??= err;
+    } finally {
+      probe.close();
+    }
+  }
+  return { up: false, error };
 }

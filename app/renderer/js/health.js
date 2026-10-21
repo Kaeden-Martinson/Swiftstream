@@ -13,7 +13,7 @@ api.health.onEvent(({ name, status, info, error, from, to, what, repairs }) => {
     state.status.set(name, 'up');
     if (info) state.info.set(name, info);
     paintStatus(name);
-    toast(`${name} is up to date (Swiftstream ${to})`);
+    toast(`Updated Swiftstream on ${name} from ${from} to ${info?.version || to}`);
     return afterRecovered(name);
   }
   if (status === 'update-failed') {

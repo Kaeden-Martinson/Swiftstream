@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_PORT, ensureDir, loadHosts, paths, readJson, writeJson } from '../src/config.js';
 import { authorizeKey, keyFingerprint, loadOrCreateIdentity } from '../src/keys.js';
 import { loadOrCreateServerCert } from '../src/tls.js';
-import { connectClient } from '../src/client.js';
+import { checkServerHealth, connectClient } from '../src/client.js';
 import { pull, pullDir, push, pushDir, remoteBasename } from '../src/transfer.js';
 import { bench, formatBench } from '../src/bench.js';
 import { openShell } from '../src/shell.js';
@@ -22,10 +22,11 @@ import { VERSION, isOlderVersion } from '../src/version.js';
 import { selfCommand } from '../src/self.js';
 import { openDesktopApp } from '../src/desktop.js';
 import { readSshConfig, sshConfigHost, sshTarget } from '../src/sshconfig.js';
-import { describeReason, repairReason } from '../src/repair.js';
+import { describeReason, repairReason, silentReason, unreachableFromHere } from '../src/repair.js';
 
 const OPTIONS = {
   port: { type: 'string' },
+  'web-port': { type: 'string' },
   host: { type: 'string' },
   root: { type: 'string' },
   parallel: { type: 'string' },
@@ -119,7 +120,7 @@ How do you want to connect?
 
   deploy: {
     group: 'Get started',
-    usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022]',
+    usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022] [--web-port 443]',
     summary: 'Set up swiftstream on a server you can log in to, and save it',
     details: `Logs in over SSH once (your SSH key if you have one, otherwise your password),
 installs Node.js for your account if the server has none, uploads swiftstream, starts it in the
@@ -249,7 +250,6 @@ installs itself on the server, and saves it under --name (default: the host's sh
     async run([target], opts) {
       need(target, this.usage);
       const name = await resolveOrSetUp(target, opts);
-      await updateServerIfOlder(name, opts);
       await withClient(name, opts, async (conn) => {
         process.exitCode = await openShell(conn);
       });
@@ -346,7 +346,7 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
 
   serve: {
     group: 'On the server',
-    usage: 'serve [--port 7022] [--host 0.0.0.0] [--root ~] [--daemon]',
+    usage: 'serve [--port 7022] [--web-port 443] [--host 0.0.0.0] [--root ~] [--daemon]',
     summary: 'Run the swiftstream server on this machine',
     async run(_args, opts) {
       const port = Number(opts.port) || DEFAULT_PORT;
@@ -354,10 +354,11 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
       if (opts.daemon) return daemonize(port, opts);
 
       const { startServer } = await import('../src/server.js');
-      const srv = await startServer({ port, host: opts.host, root: opts.root });
-      writeJson(paths.pid, { pid: process.pid, port: srv.port });
+      const srv = await startServer({ port, host: opts.host, root: opts.root, webPort: Number(opts['web-port']) || 0 });
+      writeJson(paths.pid, { pid: process.pid, port: srv.port, webPort: srv.webPort, webPortError: srv.webPortError });
       const addresses = lanAddresses();
-      ok(`swiftstream server running on port ${c.bold(srv.port)}`);
+      ok(`swiftstream server running on port ${c.bold(srv.port)}${srv.webPort ? ` and ${c.bold(srv.webPort)}` : ''}`);
+      if (srv.webPortError) warn(`Port ${opts['web-port']} isn't available (${srv.webPortError}), so only ${srv.port} is used.`);
       console.log(`  Fingerprint: ${srv.fingerprint}`);
       console.log(`\n  To connect from another computer, run there:`);
       console.log(`    swiftstream add <name> ${addresses[0] || '<this-machine>'}:${srv.port}`);
@@ -454,74 +455,90 @@ async function listComputers(name) {
 }
 
 /**
- * A server running an older Swiftstream than this one is updated before the shell opens: same SSH
- * login as setup, normally with this computer's key. If that fails, the old version is used.
- */
-async function updateServerIfOlder(name, opts) {
-  const host = loadHosts()[name];
-  if (!host?.ssh) return;
-  let remote;
-  try {
-    const conn = await client(name, {}); // no repair here: connecting right after does that once
-    try {
-      remote = await conn.request('GET', '/v1/info', { timeout: 8000 });
-    } finally {
-      conn.close();
-    }
-  } catch {
-    return; // not reachable: connecting repairs it (connectOrRepair)
-  }
-  if (!remote?.version || !isOlderVersion(remote.version, VERSION)) return;
-  info(`${name} runs Swiftstream ${remote.version}; updating it to ${VERSION}`);
-  try {
-    const port = Number(new URL(host.url).port) || DEFAULT_PORT;
-    // Key login only: a password prompt in the middle of "connect" would be a surprise.
-    await deployCommand(name, host.ssh, { ...opts, port, 'ssh-port': opts['ssh-port'] || host.sshPort }, { quiet: true, keyOnly: true });
-  } catch (err) {
-    warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Connecting with the current version.`);
-  }
-}
-
-/** If a saved server isn't answering but we know its SSH login, offer to start swiftstream again. */
-/**
- * Log in over HTTPS (quick). If that fails in a way SSH can fix and the server has an SSH login, log
- * in over SSH, find what's wrong, fix it, say what it was, and connect again. At a keyboard the SSH
- * password may be asked if this computer's key isn't accepted; scripts use the key only.
+ * Log in over HTTPS (quick), then make sure the server is current (updateIfOlder). If logging in fails
+ * in a way SSH can fix and the server has an SSH login: when nothing answered, ask the server's public
+ * health check once more (a passing hiccup just connects again); otherwise log in over SSH, find what's
+ * wrong, fix it, say what it was, and connect again. At a keyboard the SSH password may be asked if this
+ * computer's key isn't accepted; scripts use the key only.
  */
 async function connectOrRepair(name, opts = {}) {
+  let conn;
   try {
-    return await client(name, opts);
+    conn = await client(name, opts);
   } catch (err) {
     const reason = repairReason(err);
     const host = loadHosts()[name];
     if (!reason || !host?.ssh) throw err;
+    if (silentReason(reason)) {
+      const health = await checkServerHealth(host);
+      if (health.up) return updateIfOlder(name, await client(name, opts), opts);
+    }
     warn(`${describeReason(reason, name)}. Checking it over SSH (${host.ssh})…`);
-    const { repairs } = await deployHost({
+    let repairs;
+    try {
+      ({ repairs } = await deployHost({
+        name,
+        target: host.ssh,
+        sshPort: opts['ssh-port'] || host.sshPort,
+        port: Number(new URL(host.url).port) || DEFAULT_PORT,
+        restart: reason === 'unresponsive',
+        askPassword: (attempt) =>
+          process.stdin.isTTY && attempt < 3 ? askSecret(attempt ? 'Wrong password, try again:' : `Password for ${host.ssh}:`) : Promise.reject(new UserError("this computer's SSH key wasn't accepted")),
+        confirmHostKey: async () => false, // a server we've connected to before: its SSH key must be known
+        onStep: (text) => info(`${text}…`),
+      }));
+    } catch (sshErr) {
+      // Swiftstream's port and SSH both silent: most likely this network, not the server.
+      if (sshErr.code === 'SSH_UNREACHABLE' && silentReason(reason)) throw unreachableFromHere(name, host);
+      throw sshErr;
+    }
+    // On stderr, like the other progress lines: stdout may be piped (swiftstream exec … > file).
+    if (repairs.length) for (const fix of repairs) fixed(fix);
+    else fixed(`${name} looked fine over SSH and answers again`);
+    return client(name, opts); // a repair installs this version, so no update check is needed
+  }
+  return updateIfOlder(name, conn, opts);
+}
+
+const fixed = (text) => console.error(`${c.green('✓')} ${text}`);
+
+/**
+ * Logging in tells us the server's version. One older than this CLI is updated over SSH, with this
+ * computer's key only (a password prompt in the middle of a command would be a surprise), and we log
+ * in again. If updating fails, the old version keeps serving and the command goes ahead.
+ * SWIFTSTREAM_NO_SERVER_UPDATE=1 turns this off.
+ */
+async function updateIfOlder(name, conn, opts) {
+  const host = loadHosts()[name];
+  const from = conn.serverVersion;
+  if (!host?.ssh || !from || !isOlderVersion(from, VERSION) || process.env.SWIFTSTREAM_NO_SERVER_UPDATE) return conn;
+  info(`${name} runs Swiftstream ${from}; updating it to ${VERSION}…`);
+  try {
+    const { info: remote } = await deployHost({
       name,
       target: host.ssh,
       sshPort: opts['ssh-port'] || host.sshPort,
       port: Number(new URL(host.url).port) || DEFAULT_PORT,
-      restart: reason === 'unresponsive',
-      askPassword: (attempt) =>
-        process.stdin.isTTY && attempt < 3 ? askSecret(attempt ? 'Wrong password, try again:' : `Password for ${host.ssh}:`) : Promise.reject(new UserError("this computer's SSH key wasn't accepted")),
-      confirmHostKey: async () => false, // a server we've connected to before: its SSH key must be known
-      onStep: (text) => info(`${text}…`),
+      askPassword: () => Promise.reject(new UserError("this computer's SSH key wasn't accepted")),
+      confirmHostKey: async () => false,
     });
-    // On stderr, like the other progress lines: stdout may be piped (swiftstream exec … > file).
-    const fixed = (text) => console.error(`${c.green('✓')} ${text}`);
-    if (repairs.length) for (const fix of repairs) fixed(fix);
-    else fixed(`${name} looked fine over SSH and answers again`);
+    conn.close();
+    fixed(`Updated Swiftstream on ${name} from ${from} to ${remote?.version || VERSION}`);
     return client(name, opts);
+  } catch (err) {
+    warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Using ${from} for now.`);
+    return conn;
   }
 }
 
 async function deployCommand(name, target, opts, { quiet = false, keyOnly = false, identityFile } = {}) {
   validateHostName(name);
-  const { host, info: remote } = await deployHost({
+  const { host, info: remote, webNote } = await deployHost({
     name,
     target,
     sshPort: opts['ssh-port'],
     port: Number(opts.port) || DEFAULT_PORT,
+    webPort: opts['web-port'] === undefined ? undefined : Number(opts['web-port']) || 0,
     identityFile,
     askPassword: (attempt) =>
       keyOnly
@@ -547,6 +564,8 @@ async function deployCommand(name, target, opts, { quiet = false, keyOnly = fals
     onStep: (text) => info(`${text}…`),
   });
   ok(`${c.bold(name)} is ready: ${remote.hostname} (${remote.platform}) at ${new URL(host.url).host}`);
+  if (host.webUrl) info(`Also on port ${new URL(host.webUrl).port || 443}, for networks that block ${new URL(host.url).port || DEFAULT_PORT}.`);
+  if (webNote) warn(webNote);
   if (!quiet) nextSteps(name);
 }
 
@@ -616,20 +635,25 @@ async function daemonize(port, opts) {
   const { cert, fingerprint } = loadOrCreateServerCert();
   if (!(await portOpen(port))) {
     ensureDir();
+    fs.rmSync(paths.pid, { force: true });
     const logFd = fs.openSync(paths.log, 'a');
     const [exe, ...selfArgs] = selfCommand();
     const childArgs = [...selfArgs, 'serve', '--port', String(port)];
+    if (Number(opts['web-port'])) childArgs.push('--web-port', String(Number(opts['web-port'])));
     if (opts.host) childArgs.push('--host', opts.host);
     if (opts.root) childArgs.push('--root', opts.root);
     const child = spawn(exe, childArgs, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true });
     child.unref();
+    // The pid file is written once both ports have been tried, so it also says how the web port went.
     const deadline = Date.now() + 15_000;
-    while (!(await portOpen(port))) {
+    while (!(await portOpen(port)) || readJson(paths.pid, null)?.pid !== child.pid) {
       if (Date.now() > deadline) throw new UserError('The server did not start.', `See the log: ${paths.log}`);
       await new Promise((r) => setTimeout(r, 200));
     }
   }
-  console.log(readyLine({ port, fingerprint, cert }));
+  // Already running: report the ports it was started with.
+  const running = readJson(paths.pid, null) || {};
+  console.log(readyLine({ port, fingerprint, cert, webPort: running.webPort || null, webPortError: running.webPortError || null }));
 }
 
 function portOpen(port) {

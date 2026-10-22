@@ -146,6 +146,7 @@ function hostCard(host, index) {
     { label: 'Edit server…', icon: 'pencil', run: () => openEditor(host.name) },
     { label: 'Restart Swiftstream', icon: 'refresh', disabled: !host.ssh, run: () => restartServer(host.name) },
     { label: 'Authorized computers…', icon: 'pc', run: () => showComputers(host.name) },
+    { label: state.info.get(host.name)?.autoUpdate ? 'Turn off automatic updates' : 'Turn on automatic updates', icon: 'refresh', disabled: state.info.get(host.name)?.autoUpdate === undefined, run: () => setAutoUpdate(host.name, !state.info.get(host.name)?.autoUpdate) },
     { label: host.ssh ? 'Copy SSH login' : 'Copy address', icon: 'copy', run: () => (api.copy(host.ssh || host.address), toast('Copied')) },
     ...actionMenuItems('server', { host: host.name }),
     'separator',

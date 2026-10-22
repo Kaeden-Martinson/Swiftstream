@@ -9,7 +9,7 @@ import { StringDecoder } from 'node:string_decoder';
 import updater from 'electron-updater';
 import { checkServerHealth, connectClient } from './core/client.js';
 import { loadHosts, paths, readJson, writeJson } from './core/config.js';
-import { explainError } from './core/errors.js';
+import { UserError, explainError } from './core/errors.js';
 import { deployHost, getHostOrExplain, probeHost, removeHost, saveProbedHost, updateHost, validateHostName } from './core/hosts.js';
 import { keyFingerprint, loadOrCreateIdentity } from './core/keys.js';
 import { openChannel } from './core/shell.js';
@@ -253,6 +253,16 @@ handle('hosts:remove', (name) => {
   dropClient(name);
   for (const [id, t] of terminals) if (t.host === name) t.channel.close(), terminals.delete(id);
   removeHost(name);
+});
+
+// Automatic updates on the server itself (see core/selfupdate.js): a setting kept on the server.
+handle('hosts:autoUpdate', async (name, on) => {
+  try {
+    return (await withClient(name, (c) => c.request('POST', '/v1/settings', { body: { autoUpdate: !!on } }))).autoUpdate;
+  } catch (err) {
+    if (err.status === 404) throw new UserError(`${name} runs a Swiftstream from before automatic updates.`, 'Connect to it once from a network where SSH works, which updates it.');
+    throw err;
+  }
 });
 
 handle('hosts:info', async (name) => {

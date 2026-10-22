@@ -3,6 +3,7 @@
 // Needs a POSIX `sh` on PATH (Linux, macOS, or Git Bash on Windows); skipped otherwise.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -287,6 +288,53 @@ try {
   r = await ok(['connect', 'box'], { input: 'exit\n' });
   assert.doesNotMatch(r.err, /updating it/);
   console.log('ok  older server updated on login, with the key, and says which version');
+
+  // Automatic updates (opt-in): the server finds a newer release on (a stand-in for) GitHub Releases,
+  // refuses one whose checksum doesn't match, installs a good one once idle, and keeps the previous one.
+  const newer = Buffer.from(bundle.replace(JSON.stringify(version), JSON.stringify('9.9.9')));
+  let sums = `${'0'.repeat(64)}  swiftstream-9.9.9.cjs\n`; // wrong at first
+  const releases = http
+    .createServer((req, res) => {
+      const base = `http://127.0.0.1:${releases.address().port}`;
+      if (req.url === '/latest') {
+        res.setHeader('content-type', 'application/json');
+        return res.end(JSON.stringify({ tag_name: 'v9.9.9', assets: [{ name: 'swiftstream-9.9.9.cjs', browser_download_url: `${base}/bundle` }, { name: 'SHA256SUMS.txt', browser_download_url: `${base}/sums` }] }));
+      }
+      res.end(req.url === '/bundle' ? newer : sums);
+    })
+    .listen(0, '127.0.0.1');
+  await new Promise((resolve) => releases.once('listening', resolve));
+  Object.assign(process.env, {
+    SWIFTSTREAM_RELEASES_API: `http://127.0.0.1:${releases.address().port}/latest`,
+    SWIFTSTREAM_UPDATE_CHECK_MS: '500',
+    SWIFTSTREAM_IDLE_MS: '1',
+  });
+  stopRemote(users.tester);
+  await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' }); // started with the settings above
+  r = await ok(['auto-update', 'box']);
+  assert.match(r.out, /Automatic updates are off for box/);
+  r = await ok(['auto-update', 'box', 'on']);
+  assert.match(r.out, /Automatic updates are on for box/);
+  const serverLog = path.join(users.tester.home, '.swiftstream', 'server.log');
+  const currentBox = () => JSON.parse(fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8')).box;
+  const waitFor = async (what, check, ms = 30_000) => {
+    for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 250))) if (await check()) return;
+    assert.fail(`timed out waiting for ${what}`);
+  };
+  await waitFor('the checksum to be refused', () => /doesn't match its checksum/.test(fs.readFileSync(serverLog, 'utf8')));
+  assert.equal((await checkServerHealth(currentBox())).version, version);
+  sums = `${crypto.createHash('sha256').update(newer).digest('hex')}  swiftstream-9.9.9.cjs\n`;
+  await waitFor('the server to run 9.9.9', async () => (await checkServerHealth(currentBox())).version === '9.9.9');
+  assert.ok(fs.readFileSync(remoteBundle).equals(newer), 'the new program was not installed');
+  assert.ok(fs.readFileSync(`${remoteBundle}.previous`).equals(fs.readFileSync(path.join(root, 'dist', 'swiftstream.cjs'))), 'the previous program was not kept');
+  r = await ok(['exec', 'box', '--', 'echo', 'after-self-update']);
+  assert.match(r.out, /after-self-update/);
+  await ok(['auto-update', 'box', 'off']);
+  releases.close();
+  for (const key of ['SWIFTSTREAM_RELEASES_API', 'SWIFTSTREAM_UPDATE_CHECK_MS', 'SWIFTSTREAM_IDLE_MS']) delete process.env[key];
+  stopRemote(users.tester);
+  await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '' }); // back to this version
+  console.log('ok  automatic updates: off by default, a bad checksum refused, a good release installed when idle');
 
   // The standalone executable uploads the copy embedded in itself.
   if (fs.existsSync(exe)) {

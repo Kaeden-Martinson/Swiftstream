@@ -61,6 +61,7 @@ function renderTabs() {
         { label: 'Edit server…', icon: 'pencil', run: () => openEditor(session.host) },
         { label: 'Restart Swiftstream', icon: 'refresh', disabled: !hostByName(session.host)?.ssh, run: () => restartServer(session.host) },
         { label: 'Authorized computers…', icon: 'pc', run: () => showComputers(session.host) },
+        { label: state.info.get(session.host)?.autoUpdate ? 'Turn off automatic updates' : 'Turn on automatic updates', icon: 'refresh', disabled: state.info.get(session.host)?.autoUpdate === undefined, run: () => setAutoUpdate(session.host, !state.info.get(session.host)?.autoUpdate) },
         'separator',
         { label: 'Close tab', icon: 'x', hint: 'Ctrl+W', run: () => closeTab(id) },
         { label: 'Close other tabs', disabled: state.tabs.length < 2, run: () => state.tabs.filter((t) => t !== id).forEach(closeTab) },
@@ -384,6 +385,17 @@ $('banner-retry').addEventListener('click', async () => {
 $('banner-action').addEventListener('click', () => bannerAction?.());
 
 /** Restart Swiftstream on a server over SSH (menus); asks for a password only if its key isn't accepted. */
+/** Let a server update itself when Swiftstream is released (a setting kept on the server). */
+async function setAutoUpdate(name, on) {
+  try {
+    const now = await call(api.hosts.autoUpdate(name, on));
+    state.info.set(name, { ...state.info.get(name), autoUpdate: now });
+    toast(now ? `${name} now updates itself when Swiftstream is released` : `Automatic updates are off for ${name}`);
+  } catch (err) {
+    toast(err.hint ? `${err.message} ${err.hint}` : err.message);
+  }
+}
+
 async function restartServer(name) {
   const host = hostByName(name);
   if (!host?.ssh) return toast('Add an SSH login for this server first (Edit server)');

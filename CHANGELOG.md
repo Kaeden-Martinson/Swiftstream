@@ -4,6 +4,10 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-22
+
+- Servers can update themselves (opt-in): `swiftstream auto-update <name> on`, or **Turn on automatic updates** in the app's server menu. The server checks GitHub Releases every 6 hours, verifies a newer version against the release's checksums and that it runs, and restarts on it once nobody is using it, putting the previous version back if the new one doesn't start. The setting works over HTTPS, so it can be changed from networks that block SSH.
+
 ## [0.1.8] - 2026-10-22
 
 - Servers also listen on port 8443, tried after 443. Many networks that block 7022 allow it, and it needs no special permission, so it also covers servers where a website holds 443.

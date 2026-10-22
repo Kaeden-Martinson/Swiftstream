@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { DEFAULT_PORT, ensureDir, loadHosts, parsePortList, paths, readJson, writeJson } from '../src/config.js';
 import { parseShareTarget } from '../src/sni.js';
@@ -382,6 +382,30 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
       };
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);
+      startSelfUpdates(srv, port, opts);
+    },
+  },
+
+  'auto-update': {
+    group: 'Use a server',
+    usage: 'auto-update <name> [on | off]',
+    summary: 'Let a server update itself when Swiftstream is released',
+    details: `With "on", the server checks GitHub Releases every 6 hours. A newer Swiftstream is downloaded,
+checked against the release's checksums, and installed once nobody is using the server (no terminal
+open, no transfer for 5 minutes). Without on or off, says whether it's on. Off by default.`,
+    async run([name, value], opts) {
+      need(name, this.usage);
+      if (value !== undefined && !['on', 'off'].includes(value)) throw new UserError(`Use "on" or "off", not "${value}".`);
+      await withClient(name, opts, async (conn) => {
+        let settings;
+        try {
+          settings = value === undefined ? await conn.request('GET', '/v1/settings') : await conn.request('POST', '/v1/settings', { body: { autoUpdate: value === 'on' } });
+        } catch (err) {
+          if (err.status === 404) throw new UserError(`${name} runs a Swiftstream from before automatic updates.`, `Update it first: connect to it once from a network where SSH works.`);
+          throw err;
+        }
+        ok(`Automatic updates are ${settings.autoUpdate ? 'on' : 'off'} for ${c.bold(name)}`);
+      });
     },
   },
 
@@ -706,6 +730,47 @@ async function daemonize(port, opts) {
   // Already running: report the ports it was started with.
   const running = readJson(paths.pid, null) || {};
   console.log(readyLine({ port, fingerprint, cert, webPorts: running.webPorts || (running.webPort ? [running.webPort] : []), webPortErrors: running.webPortErrors || {}, sharing: running.sharing || null }));
+}
+
+/**
+ * Automatic updates (opt-in; see src/selfupdate.js), for a server running as the uploaded
+ * swiftstream.cjs, the one file it can swap. To restart on the new program it stops serving and starts
+ * it the way setup does (serve --daemon); if that fails, the previous program goes back and starts.
+ */
+function startSelfUpdates(srv, port, opts) {
+  const bundlePath = process.argv[1];
+  if (!/\.cjs$/.test(bundlePath || '') || process.env.SWIFTSTREAM_NO_SELF_UPDATE) return;
+  const log = (...args) => console.log(new Date().toISOString(), ...args);
+  import('../src/selfupdate.js').then(({ startAutoUpdater }) =>
+    startAutoUpdater({
+      current: VERSION,
+      bundlePath,
+      enabled: () => readJson(paths.serveConfig, {}).autoUpdate === true,
+      isIdle: () => srv.isIdle(Number(process.env.SWIFTSTREAM_IDLE_MS) || undefined),
+      log,
+      restart: async (file, version) => {
+        const previous = `${bundlePath}.previous`;
+        fs.copyFileSync(bundlePath, previous);
+        fs.renameSync(file, bundlePath);
+        fs.rmSync(paths.pid, { force: true });
+        await srv.close(2000);
+        const args = ['serve', '--daemon', '--port', String(port)];
+        const webPorts = parsePortList(opts['web-port']);
+        if (webPorts.length) args.push('--web-port', webPorts.join(','));
+        if (opts.host) args.push('--host', opts.host);
+        if (opts.root) args.push('--root', opts.root);
+        const start = () => spawnSync(process.execPath, [bundlePath, ...args], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, NO_COLOR: '1' } });
+        if (start().status === 0) {
+          log('update: now running', version);
+        } else {
+          log('update:', version, "didn't start; going back to", VERSION);
+          fs.copyFileSync(previous, bundlePath);
+          start();
+        }
+        process.exit(0);
+      },
+    }),
+  );
 }
 
 function portOpen(port) {

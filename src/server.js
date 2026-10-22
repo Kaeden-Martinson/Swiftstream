@@ -69,6 +69,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
   const uploads = new Map(); // id -> upload state (mirrored to disk so uploads survive restarts)
   const authAttempts = new Map(); // ip -> { windowStart, failures, challenges }
   const web = { ports: [], errors: {}, listeners: [] }; // the web ports that opened, and why others didn't
+  let lastTransfer = 0; // when a file last moved, for "nobody is using it" (see isIdle)
 
   /** Brute-force protection: count challenges and failed logins per client IP. */
   const authBudget = (req) => {
@@ -164,9 +165,24 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
       return { token, expiresIn: SESSION_TTL_MS / 1000 };
     },
 
+    // Server settings anyone logged in may change: automatic updates (see selfupdate.js).
+    'GET /v1/settings': async (req) => {
+      authenticate(req);
+      return { autoUpdate: readJson(paths.serveConfig, {}).autoUpdate === true };
+    },
+
+    'POST /v1/settings': async (req) => {
+      authenticate(req);
+      const { autoUpdate } = await readJsonBody(req);
+      if (typeof autoUpdate !== 'boolean') throw new HttpError(400, 'autoUpdate must be true or false');
+      writeJson(paths.serveConfig, { ...readJson(paths.serveConfig, {}), autoUpdate });
+      log('automatic updates', autoUpdate ? 'on' : 'off');
+      return { autoUpdate };
+    },
+
     'GET /v1/info': async (req) => {
       authenticate(req);
-      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty, webPorts: web.ports, webPortErrors: web.errors, sharing: !!shareWith };
+      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty, webPorts: web.ports, webPortErrors: web.errors, sharing: !!shareWith, autoUpdate: readJson(paths.serveConfig, {}).autoUpdate === true };
     },
 
     'GET /v1/stat': async (req, url) => {
@@ -441,6 +457,10 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
     res.setHeader('cache-control', 'no-store');
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('x-frame-options', 'DENY');
+    if (/^\/v1\/(upload|bundle|file)/.test(url.pathname)) {
+      lastTransfer = Date.now();
+      res.on('close', () => (lastTransfer = Date.now()));
+    }
     try {
       if (!route) throw new HttpError(404, 'not found');
       const result = await route(req, url, res);
@@ -540,7 +560,10 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
       }, graceMs).unref();
     });
 
-  return { server, fingerprint, cert, port: server.address().port, webPorts: web.ports, webPortErrors: web.errors, close };
+  /** Nobody is using Swiftstream: no terminal open and no file moved in the last `quietMs`. */
+  const isIdle = (quietMs = 5 * 60_000) => wss.clients.size === 0 && Date.now() - lastTransfer > quietMs;
+
+  return { server, fingerprint, cert, port: server.address().port, webPorts: web.ports, webPortErrors: web.errors, isIdle, close };
 }
 
 let scriptFlavor; // 'linux' (util-linux/busybox), 'bsd' (macOS/BSD), or null

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('swift', {
     remove: (name) => call('hosts:remove', name),
     update: (name, changes) => call('hosts:update', name, changes),
     info: (name) => call('hosts:info', name),
+    autoUpdate: (name, on) => call('hosts:autoUpdate', name, on),
     sshConfig: () => call('sshconfig:list'),
     computers: (name) => call('hosts:computers', name),
     revoke: (name, fingerprint) => call('hosts:revoke', name, fingerprint),

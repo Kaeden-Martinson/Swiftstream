@@ -81,6 +81,8 @@ Updates are off when running from source, and on macOS until the Mac build is si
 
 ## FAQ
 
+**Do servers update themselves?** Only with automatic updates on (`swiftstream auto-update <name> on`, or the server's right-click menu in the app); otherwise a server is updated when you connect to it from a network where SSH works. With them on, it checks every 6 hours and restarts on a new version once nobody is using it. `~/.swiftstream/server.log` on the server says what it found and did.
+
 **Does it replace SSH?** No. It uses SSH once to set itself up (and again to restart itself if it stops). Day to day, shells and transfers go over its own HTTPS connection, which is what makes transfers fast and resumable.
 
 **What does it install on my server?** One file, `~/.swiftstream/bin/swiftstream.cjs`, plus Node.js in `~/.swiftstream/runtime` if the server didn't have it, and an `@reboot` line in your crontab. It runs as your user, never as root unless you log in as root.

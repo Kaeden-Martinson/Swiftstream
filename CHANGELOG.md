@@ -4,6 +4,12 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-22
+
+- Port 443 also works where Swiftstream ran on the server's system Node.js as a regular user: setup installs Swiftstream's own Node.js and gives only that copy permission for port 443 (with sudo). The system's Node.js is never changed.
+- Fixed: the desktop app run from source could install an older Swiftstream on servers ("it still reports 0.1.5 after updating"). It now builds the server program from the checkout, however it was started.
+- Updating a server says why port 443 couldn't be added there, as setup does.
+
 ## [0.1.6] - 2026-10-21
 
 - Swiftstream gets through networks that only allow web ports (school, work and public Wi-Fi often block 7022). Setup, and the next update or repair, also opens Swiftstream on port 443, and the app and the command line switch to it when 7022 doesn't answer. As root it just works; for another Linux user, Swiftstream's own Node.js is given permission for port 443 with sudo (`setcap cap_net_bind_service`). If 443 is taken by a web server, or permission can't be given, setup says so and why. `--web-port` picks another port; `--web-port 0` turns it off.

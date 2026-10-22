@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -45,6 +45,29 @@ function setTaskbarDetails() {
     relaunchDisplayName: 'Swiftstream',
   });
 }
+/**
+ * The Swiftstream program the app installs on servers. The installed app carries it in core/. Run from
+ * source (however it was started), core/ can lag behind the code, and servers would be "updated" to an
+ * older version: build it fresh from the checkout once per run instead, falling back to core/.
+ */
+let builtBundle;
+function serverBundle() {
+  const shipped = path.join(dirname, 'core', 'swiftstream.cjs');
+  if (app.isPackaged) return shipped;
+  if (builtBundle === undefined) {
+    const repo = path.join(dirname, '..');
+    const build = spawnSync(process.execPath, [path.join(repo, 'scripts', 'build.mjs'), '--no-exe'], {
+      cwd: repo,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    builtBundle = build.status === 0 ? path.join(repo, 'dist', 'swiftstream.cjs') : null;
+    if (!builtBundle) log.warn('building the server program from source failed; using core/', { stderr: String(build.stderr || build.error || '').slice(-500) });
+  }
+  return builtBundle || shipped;
+}
+
 const clients = new Map(); // host name -> logged-in SwiftClient
 const terminals = new Map(); // terminal id -> { channel, host }
 const probes = new Map(); // url -> fetched certificate waiting for the user's "trust" click
@@ -207,7 +230,7 @@ handle('hosts:deploy', async ({ name, target, sshPort, password, identityFile })
     password: password || undefined,
     identityFile: identityFile || undefined, // IdentityFile from ~/.ssh/config, tried first
     askPassphrase: ({ file, attempt }) => askWindow('passphrase', { file, attempt, target }),
-    bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
+    bundlePath: serverBundle(),
     // The SSH host key is remembered on first use; a changed key is refused (see core/deploy.js).
     confirmHostKey: async () => true,
     onStep: (text) => send('deploy:step', { name, text }),
@@ -669,7 +692,7 @@ function repairServer(name, reason, original) {
         sshPort: host.sshPort,
         port: savedPort(name),
         restart: reason === 'unresponsive',
-        bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
+        bundlePath: serverBundle(),
         confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
       });
       lastRepairFailure.delete(name);
@@ -728,12 +751,12 @@ async function redeploy(name, st, { statuses: [busy, done, failed], extra = {} }
   try {
     const host = loadHosts()[name];
     dropClient(name);
-    const { info } = await deployHost({
+    const { info, webNote } = await deployHost({
       name,
       target: host.ssh,
       sshPort: host.sshPort,
       port: savedPort(name),
-      bundlePath: path.join(dirname, 'core', 'swiftstream.cjs'),
+      bundlePath: serverBundle(),
       confirmHostKey: async () => false, // unattended: only servers whose SSH key we already know
     });
     if (extra.to && info?.version && isOlderVersion(info.version, extra.to)) {
@@ -745,6 +768,7 @@ async function redeploy(name, st, { statuses: [busy, done, failed], extra = {} }
     }
     send('health', { name, status: done, info, ...extra });
     log.info(`server ${name} ${done}`, { version: info?.version });
+    if (webNote) log.info(`server ${name} web port`, { note: webNote });
   } catch (err) {
     if (err.stale) st.last = Infinity; // only a new app build fixes it: don't retry until then
     send('health', { name, status: failed, error: explainForApp(err, name), ...extra });

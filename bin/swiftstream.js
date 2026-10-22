@@ -514,7 +514,7 @@ async function updateIfOlder(name, conn, opts) {
   if (!host?.ssh || !from || !isOlderVersion(from, VERSION) || process.env.SWIFTSTREAM_NO_SERVER_UPDATE) return conn;
   info(`${name} runs Swiftstream ${from}; updating it to ${VERSION}…`);
   try {
-    const { info: remote } = await deployHost({
+    const { info: remote, webNote } = await deployHost({
       name,
       target: host.ssh,
       sshPort: opts['ssh-port'] || host.sshPort,
@@ -524,6 +524,7 @@ async function updateIfOlder(name, conn, opts) {
     });
     conn.close();
     fixed(`Updated Swiftstream on ${name} from ${from} to ${remote?.version || VERSION}`);
+    if (webNote) warn(webNote);
     return client(name, opts);
   } catch (err) {
     warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Using ${from} for now.`);

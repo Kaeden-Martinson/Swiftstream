@@ -93,6 +93,11 @@ export async function deployOverSsh({
     webPort = Number(webPort) || 0;
     if (webPort === Number(port)) webPort = 0;
     const webAccess = webPort ? await allowWebPort(session, facts, node, webPort, onStep) : { ok: false };
+    if (webAccess.node && webAccess.node !== node) {
+      // Moving to Swiftstream's own Node.js (see allowWebPort): stop the copy running on the old one.
+      if (facts.running) await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
+      node = webAccess.node;
+    }
 
     if (restart && facts.running && facts.bundle_sha === bundleSha) {
       onStep('Restarting Swiftstream');
@@ -112,8 +117,8 @@ export async function deployOverSsh({
     };
     let ready = await startServe();
     // Already running from a start that didn't ask for the web port (no error means it never tried),
-    // and it may open it now: start it again, once, with the port.
-    if (webPort && webAccess.ok && !ready.webPort && !ready.webPortError) {
+    // or that wasn't allowed to open it until just now: start it again, once, with the port.
+    if (webPort && webAccess.ok && !ready.webPort && (!ready.webPortError || (webAccess.changed && ready.webPortError === 'EACCES'))) {
       onStep(`Restarting Swiftstream to add port ${webPort}`);
       await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
       ready = await startServe();
@@ -410,9 +415,11 @@ const PACKAGE_INSTALL = {
   zypper: 'zypper --non-interactive install nodejs',
 };
 
+/** Whether the official Node.js build can be downloaded for this server (glibc Linux or macOS, 64-bit). */
+const canDownloadNode = (facts) => facts.libc === 'glibc' && /^(Linux|Darwin)$/.test(facts.os) && /^(x86_64|amd64|aarch64|arm64)$/.test(facts.arch) && !!facts.fetch;
+
 async function installNode(conn, facts, onStep, sudoPassword) {
-  const canDownload = facts.libc === 'glibc' && /^(Linux|Darwin)$/.test(facts.os) && /^(x86_64|amd64|aarch64|arm64)$/.test(facts.arch) && facts.fetch;
-  if (canDownload) {
+  if (canDownloadNode(facts)) {
     onStep('Installing Node.js for your account (one time)');
     const res = await run(conn, 'sh -s', { stdin: NODE_DOWNLOAD });
     const nodePath = res.stdout.trim().split('\n').pop();
@@ -447,25 +454,35 @@ async function installNode(conn, facts, onStep, sudoPassword) {
  * Make sure Swiftstream may open the web port. Root can; Linux keeps ports below 1024 for root unless
  * lowered by a sysctl. Otherwise Swiftstream's own Node.js (in ~/.swiftstream/runtime, used by nothing
  * else) gets the one permission it needs, cap_net_bind_service, with sudo: passwordless, or the SSH
- * login password when we have it. The system's Node.js is left alone.
- * { ok: true } or { ok: false, command } with what to run on the server to allow it.
+ * login password when we have it. The system's Node.js is never given it, since every program on the
+ * server uses that one: where Swiftstream ran on it, its own copy is installed first.
+ * { ok, node, changed } (node: the Node.js to run Swiftstream with; changed: permission given just now),
+ * or { ok: false, command } with what to run on the server to allow it.
  */
 async function allowWebPort(conn, facts, node, webPort, onStep) {
-  if (facts.uid === '0' || facts.os !== 'Linux' || webPort >= 1024) return { ok: true };
-  if (Number(facts.unpriv_from) && webPort >= Number(facts.unpriv_from)) return { ok: true };
-  if (!/\/\.(swiftstream|swiftssh)\/runtime\//.test(node)) return { ok: false, systemNode: true };
-  const real = (await run(conn, sh(`readlink -f "${node}"`))).stdout.trim() || node;
+  if (facts.uid === '0' || facts.os !== 'Linux' || webPort >= 1024) return { ok: true, node };
+  if (Number(facts.unpriv_from) && webPort >= Number(facts.unpriv_from)) return { ok: true, node };
+  const sudo = (command) =>
+    conn.loginPassword ? run(conn, `sudo -S -p '' ${sh(command)}`, { stdin: `${conn.loginPassword}\n` }) : run(conn, `sudo -n ${sh(command)}`);
+  const canSudo = async () => !!facts.sudo && (await sudo('true').catch(() => ({ code: 1 }))).code === 0;
+
+  let own = node;
+  if (!/\/\.(swiftstream|swiftssh)\/runtime\//.test(node)) {
+    if (!canDownloadNode(facts) || !(await canSudo())) return { ok: false, node, systemNode: true };
+    onStep(`Installing Swiftstream's own Node.js, for port ${webPort}`);
+    const res = await run(conn, 'sh -s', { stdin: NODE_DOWNLOAD });
+    own = res.code === 0 ? res.stdout.trim().split('\n').pop() : '';
+    if (!own) return { ok: false, node, systemNode: true };
+  }
+  const real = (await run(conn, sh(`readlink -f "${own}"`))).stdout.trim() || own;
   const command = `setcap cap_net_bind_service=+ep "${real}"`;
   const has = await run(conn, sh(`PATH="$PATH:/sbin:/usr/sbin" getcap "${real}"`)).catch(() => ({ stdout: '' }));
-  if (/cap_net_bind_service/.test(has.stdout)) return { ok: true };
+  if (/cap_net_bind_service/.test(has.stdout)) return { ok: true, node: own };
   if (facts.sudo) {
     onStep(`Allowing Swiftstream to use port ${webPort}`);
-    const res = conn.loginPassword
-      ? await run(conn, `sudo -S -p '' ${sh(command)}`, { stdin: `${conn.loginPassword}\n` })
-      : await run(conn, `sudo -n ${sh(command)}`);
-    if (res.code === 0) return { ok: true };
+    if ((await sudo(command)).code === 0) return { ok: true, node: own, changed: true };
   }
-  return { ok: false, command: `sudo ${command}` };
+  return { ok: false, node: own, command: `sudo ${command}` };
 }
 
 /** Why the web port isn't in use, and how to add it, for setup's output. */

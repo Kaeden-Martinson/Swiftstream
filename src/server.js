@@ -10,6 +10,7 @@ import { WebSocketServer } from 'ws';
 import { ensureDir, paths, readJson, writeJson } from './config.js';
 import { authMessage, authorizedKeyEntries, decodePublicKey, keyFingerprint, normalizePublicKey, readAuthorizedKeys, removeAuthorizedKey, verify } from './keys.js';
 import { loadOrCreateServerCert } from './tls.js';
+import { createSniRouter } from './sni.js';
 import { decodeBundle, encodeBundle } from './bundle.js';
 import { hashFile, safeJoin, sameMtime, walk, writeFileAtomic } from './util.js';
 import { VERSION } from './version.js';
@@ -45,11 +46,20 @@ function log(...args) {
 }
 
 /**
- * webPort: a second port, normally 443, for networks that only let web ports out (school and work
- * Wi-Fi). Same server, same certificate. If it can't be opened (taken by a web server, or below 1024
- * without permission), Swiftstream runs on `port` alone and says why in `webPortError`.
+ * The client's address. Connections that came through a shared port (sni.js) reach TLS as a stream
+ * that carries the address itself, which Node keeps on the TLS handle (an internal path, so "unknown"
+ * if that ever moves); otherwise it's the socket's.
  */
-export async function startServer({ port, host = '0.0.0.0', root = os.homedir(), webPort = 0 }) {
+const clientAddress = (req) => req.socket.remoteAddress || req.socket._handle?._parentWrap?.stream?.remoteAddress || 'unknown';
+
+/**
+ * webPorts: more ports, normally 443 and 8443, for networks that only let web ports out (school and
+ * work Wi-Fi). Same server, same certificate. One that can't be opened (taken by a web server, or below
+ * 1024 without permission) is skipped, and `webPortErrors` says why.
+ * shareWith ({ host, port }): the program that used to own a web port, moved to that address. The web
+ * ports then pass every connection that isn't Swiftstream's on to it, still encrypted (see sni.js).
+ */
+export async function startServer({ port, host = '0.0.0.0', root = os.homedir(), webPorts = [], shareWith = null }) {
   const { key, cert, fingerprint } = loadOrCreateServerCert();
   const pty = await loadPty();
   ensureDir(paths.uploads);
@@ -58,11 +68,11 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
   const sessions = new Map(); // token -> { expires, key }
   const uploads = new Map(); // id -> upload state (mirrored to disk so uploads survive restarts)
   const authAttempts = new Map(); // ip -> { windowStart, failures, challenges }
-  const web = { port: null, error: null, listener: null }; // the second (web) port, once it's open
+  const web = { ports: [], errors: {}, listeners: [] }; // the web ports that opened, and why others didn't
 
   /** Brute-force protection: count challenges and failed logins per client IP. */
   const authBudget = (req) => {
-    const ip = req.socket.remoteAddress || 'unknown';
+    const ip = clientAddress(req);
     const now = Date.now();
     let entry = authAttempts.get(ip);
     if (!entry || now - entry.windowStart > AUTH_WINDOW_MS) {
@@ -150,13 +160,13 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
       }
       const token = crypto.randomBytes(32).toString('base64url');
       sessions.set(token, { expires: Date.now() + SESSION_TTL_MS, key: wanted });
-      log('auth ok', keyFingerprint(wanted), req.socket.remoteAddress);
+      log('auth ok', keyFingerprint(wanted), clientAddress(req));
       return { token, expiresIn: SESSION_TTL_MS / 1000 };
     },
 
     'GET /v1/info': async (req) => {
       authenticate(req);
-      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty, webPort: web.port, webPortError: web.error };
+      return { version: VERSION, hostname: os.hostname(), platform: process.platform, root, pty: !!pty, webPorts: web.ports, webPortErrors: web.errors, sharing: !!shareWith };
     },
 
     'GET /v1/stat': async (req, url) => {
@@ -496,29 +506,31 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
     server.listen(port, host, resolve);
   });
 
-  // The web port hands each connection to the same HTTPS server.
-  if (Number(webPort) && Number(webPort) !== server.address().port) {
-    const listener = net.createServer((socket) => server.emit('connection', socket));
+  // Each web port hands its connections to the same HTTPS server, or when sharing, only Swiftstream's.
+  const own = (socket) => server.emit('connection', socket);
+  for (const webPort of [...new Set(webPorts.map(Number))].filter((p) => p && p !== server.address().port)) {
+    const listener = shareWith ? createSniRouter({ own, forwardTo: shareWith, log }) : net.createServer(own);
     await new Promise((resolve) => {
       listener.once('error', (err) => {
-        web.error = err.code || err.message;
-        log('web port', webPort, 'not available:', web.error);
+        web.errors[webPort] = err.code || err.message;
+        log('web port', webPort, 'not available:', web.errors[webPort]);
         resolve();
       });
-      listener.listen(Number(webPort), host, () => {
-        web.port = listener.address().port;
-        web.listener = listener;
+      listener.listen(webPort, host, () => {
+        web.ports.push(listener.address().port);
+        web.listeners.push(listener);
         resolve();
       });
     });
   }
+  if (shareWith && web.ports.length) log('sharing ports', web.ports.join(', '), 'with', `${shareWith.host}:${shareWith.port}`);
 
   /** Stop accepting connections, end open shells, and resolve once the server is closed. */
   const close = (graceMs = 5000) =>
     new Promise((resolve) => {
       clearInterval(sweeper);
       clearInterval(janitor);
-      web.listener?.close();
+      for (const listener of web.listeners) listener.close();
       for (const ws of wss.clients) ws.close(1001, 'server shutting down');
       server.close(() => resolve());
       server.closeIdleConnections?.();
@@ -528,7 +540,7 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
       }, graceMs).unref();
     });
 
-  return { server, fingerprint, cert, port: server.address().port, webPort: web.port, webPortError: web.error, close };
+  return { server, fingerprint, cert, port: server.address().port, webPorts: web.ports, webPortErrors: web.errors, close };
 }
 
 let scriptFlavor; // 'linux' (util-linux/busybox), 'bsd' (macOS/BSD), or null

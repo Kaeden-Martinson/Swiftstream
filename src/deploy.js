@@ -4,7 +4,8 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import ssh2 from 'ssh2';
-import { DEFAULT_PORT, DEFAULT_WEB_PORT, paths, readJson, writeJson } from './config.js';
+import { DEFAULT_PORT, DEFAULT_WEB_PORTS, parsePortList, paths, readJson, writeJson } from './config.js';
+import { parseShareTarget } from './sni.js';
 import { UserError } from './errors.js';
 import { computerLabel, sshPrivateKeyPem, sshPublicKeyLine } from './keys.js';
 import { loadServerBundle } from './self.js';
@@ -31,7 +32,8 @@ export async function deployOverSsh({
   target,
   sshPort = 22,
   port = DEFAULT_PORT,
-  webPort = DEFAULT_WEB_PORT, // a second port for networks that only allow web ports; 0 for none
+  webPorts = DEFAULT_WEB_PORTS, // more ports for networks that only allow web ports ([] for none)
+  shareWith, // share the web ports with the program moved off them ("127.0.0.1:8444", or "off"); unset keeps the server's setting
   publicKey,
   identityKey, // this computer's private key: tried for SSH login, and authorized for SSH so restarts need no password
   authorizeSsh = true,
@@ -89,10 +91,10 @@ export async function deployOverSsh({
     const known = await run(session, sh(`grep -qF "${keyData}" "$HOME/.swiftstream/authorized_keys" 2>/dev/null`)).catch(() => ({ code: 1 }));
     if (known.code !== 0 && facts.bundle_sha) repairs.push("This computer's key wasn't accepted, so it was authorized again");
 
-    // The web port (443): ports below 1024 need root, or permission for Swiftstream's own Node.js.
-    webPort = Number(webPort) || 0;
-    if (webPort === Number(port)) webPort = 0;
-    const webAccess = webPort ? await allowWebPort(session, facts, node, webPort, onStep) : { ok: false };
+    // The web ports (443, 8443): ones below 1024 need root, or permission for Swiftstream's own Node.js.
+    webPorts = parsePortList(Array.isArray(webPorts) ? webPorts.join(',') : webPorts).filter((p) => p !== Number(port));
+    const lowPorts = webPorts.filter((p) => p < 1024);
+    const webAccess = lowPorts.length ? await allowWebPort(session, facts, node, Math.min(...lowPorts), onStep) : { ok: true, node };
     if (webAccess.node && webAccess.node !== node) {
       // Moving to Swiftstream's own Node.js (see allowWebPort): stop the copy running on the old one.
       if (facts.running) await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
@@ -107,23 +109,35 @@ export async function deployOverSsh({
       repairs.push('Swiftstream had stopped, so it was started again');
     }
     onStep('Starting Swiftstream');
+    const webArgs = webPorts.length ? ` --web-port ${webPorts.join(',')}` : '';
+    // Sharing is saved on the server (serve.json): only a change is passed, and restarts keep it.
+    const share = shareWith === undefined ? undefined : parseShareTarget(shareWith);
+    if (share === undefined && shareWith !== undefined) throw new UserError(`"${shareWith}" isn't an address to share with.`, 'Use a port or host:port, like 127.0.0.1:8444, or "off".');
+    const shareArg = shareWith === undefined ? '' : ` --share-with ${share ? `${share.host}:${share.port}` : 'off'}`;
     const startServe = async () => {
-      const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webPort ? ` --web-port ${webPort}` : ''} --authorize "${publicKey} ${computerLabel()}"`));
+      const start = await run(session, sh(`NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webArgs}${shareArg} --authorize "${publicKey} ${computerLabel()}"`));
       const line = start.stdout.split(/\r?\n/).find((l) => l.startsWith(READY_PREFIX) || l.startsWith(LEGACY_READY_PREFIX));
       if (!line) {
         throw new UserError(`Swiftstream didn't start on ${host}.`, (start.stderr || start.stdout).trim().split('\n').slice(-6).join('\n') || 'See ~/.swiftstream/server.log on the server.');
       }
-      return { ...parseReadyLine(line), host, repairs };
+      const parsed = parseReadyLine(line);
+      // A server from 0.1.6 or 0.1.7 reports a single web port.
+      parsed.webPorts ??= parsed.webPort ? [parsed.webPort] : [];
+      parsed.webPortErrors ??= {};
+      return { ...parsed, host, repairs };
     };
     let ready = await startServe();
-    // Already running from a start that didn't ask for the web port (no error means it never tried),
-    // or that wasn't allowed to open it until just now: start it again, once, with the port.
-    if (webPort && webAccess.ok && !ready.webPort && (!ready.webPortError || (webAccess.changed && ready.webPortError === 'EACCES'))) {
-      onStep(`Restarting Swiftstream to add port ${webPort}`);
+    // Already running from a start that didn't ask for a web port (no error means it never tried), or
+    // that wasn't allowed to open one until just now: start it again, once, with the ports.
+    const missing = (r) =>
+      webPorts.filter((p) => !r.webPorts.includes(p) && (p >= 1024 || webAccess.ok) && (!r.webPortErrors[p] || (webAccess.changed && r.webPortErrors[p] === 'EACCES')));
+    if (missing(ready).length) {
+      onStep(`Restarting Swiftstream to add port ${missing(ready).join(' and ')}`);
       await run(session, sh(`"${node}" "${REMOTE_BUNDLE}" stop`)).catch(() => {});
       ready = await startServe();
     }
-    ready.webNote = webPort && !ready.webPort ? webPortNote(webPort, ready.webPortError, webAccess, host) : null;
+    const notes = webPorts.filter((p) => !ready.webPorts.includes(p)).map((p) => webPortNote(p, ready.webPortErrors[p], p < 1024 ? webAccess : {}, host, ready.webPorts));
+    ready.webNote = notes.length ? notes.join('\n') : null;
 
     if (identityKey && authorizeSsh) {
       // Let this computer log in over SSH with its Swiftstream key, so a stopped server can be
@@ -135,7 +149,7 @@ export async function deployOverSsh({
     }
 
     // Start again after a reboot, where the server allows a user crontab.
-    const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webPort ? ` --web-port ${webPort}` : ''} >/dev/null 2>&1`;
+    const cronLine = `@reboot NO_COLOR=1 "${node}" "${REMOTE_BUNDLE}" serve --daemon --port ${Number(port)}${webArgs} >/dev/null 2>&1`;
     const cron = await run(
       session,
       sh(`command -v crontab >/dev/null 2>&1 || exit 3; (crontab -l 2>/dev/null | grep -v -e "swiftstream.cjs\" serve" -e "swiftssh.cjs\" serve"; echo '${cronLine.replace(/'/g, `'"'"'`)}') | crontab -`),
@@ -485,17 +499,20 @@ async function allowWebPort(conn, facts, node, webPort, onStep) {
   return { ok: false, node: own, command: `sudo ${command}` };
 }
 
-/** Why the web port isn't in use, and how to add it, for setup's output. */
-function webPortNote(webPort, error, access, host) {
-  if (error === 'EADDRINUSE') return `Port ${webPort} on ${host} is used by another program (a web server?), so Swiftstream isn't on it. Networks that block other ports can't reach Swiftstream there.`;
+/** Why a web port isn't in use, and how to add it, for setup's output. `open`: the web ports that did open. */
+function webPortNote(webPort, error, access, host, open = []) {
+  if (error === 'EADDRINUSE') {
+    const instead = open.length ? `Swiftstream uses ${open.join(' and ')} instead` : "Swiftstream isn't on it";
+    return `Port ${webPort} on ${host} is used by another program (a web server?), so ${instead}. To share ${webPort} with that program, see "Sharing port 443" in docs/TROUBLESHOOTING.md.`;
+  }
   if (access.command) return `Port ${webPort} needs permission on ${host}. To allow it, run there:\n  ${access.command}\nthen connect again.`;
   if (access.systemNode) return `Port ${webPort} needs root on ${host}, and Swiftstream runs on the system's Node.js there, so it only uses its main port.`;
   return `Swiftstream couldn't open port ${webPort} on ${host}${error ? ` (${error})` : ''}.`;
 }
 
 /** One machine-readable line the server prints when it is up, so deploy can pin its cert. */
-export function readyLine({ port, fingerprint, cert, webPort = null, webPortError = null }) {
-  return READY_PREFIX + Buffer.from(JSON.stringify({ port, fingerprint, cert, webPort, webPortError })).toString('base64');
+export function readyLine({ port, fingerprint, cert, webPorts = [], webPortErrors = {}, sharing = null }) {
+  return READY_PREFIX + Buffer.from(JSON.stringify({ port, fingerprint, cert, webPorts, webPortErrors, sharing })).toString('base64');
 }
 
 export function parseReadyLine(line) {

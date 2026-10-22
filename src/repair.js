@@ -46,12 +46,12 @@ export const silentReason = (reason) => reason === 'stopped' || reason === 'unre
  * both (school and work Wi-Fi often refuse every port but the web's), so say that rather than "stopped".
  */
 export function unreachableFromHere(name, host) {
-  const ports = [host.url, host.webUrl].filter(Boolean).map((u) => new URL(u).port || 443);
+  const ports = [host.url, ...(host.webUrls || []), host.webUrl].filter(Boolean).map((u) => new URL(u).port || 443);
   const sshPort = host.sshPort || 22;
   const err = new UserError(
     `Can't reach ${name} from this network: Swiftstream (port ${ports.join(' or ')}) and SSH (port ${sshPort}) both don't answer.`,
     `If ${name} works from other networks, this one blocks those ports (common on school, work and public Wi-Fi) and Swiftstream is probably still running. A phone hotspot or VPN gets through.` +
-      (host.webUrl ? '' : ` Setting ${name} up again from another network also opens port 443, which most networks allow.`),
+      (host.webUrls || host.webUrl ? '' : ` Connecting once from a network where SSH works also opens ports 443 and 8443, which most networks allow.`),
   );
   err.code = 'NETWORK_BLOCKED';
   return err;

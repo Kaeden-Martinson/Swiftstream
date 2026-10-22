@@ -4,6 +4,13 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-22
+
+- Servers also listen on port 8443, tried after 443. Many networks that block 7022 allow it, and it needs no special permission, so it also covers servers where a website holds 443.
+- Swiftstream can share port 443 with a website (`deploy … --share-with 127.0.0.1:8444`): it keeps the connections that name it (SNI) and passes every other one on to the website, still encrypted. The setting is kept on the server across updates, repairs and reboots. See "Sharing port 443" in the troubleshooting guide.
+- On a network that blocks SSH, the command line no longer spends 10 seconds trying to update a server on every command: after SSH doesn't answer, it waits 15 minutes before trying again.
+- `swiftstream stop` waits for the server to finish stopping.
+
 ## [0.1.7] - 2026-10-22
 
 - Port 443 also works where Swiftstream ran on the server's system Node.js as a regular user: setup installs Swiftstream's own Node.js and gives only that copy permission for port 443 (with sudo). The system's Node.js is never changed.

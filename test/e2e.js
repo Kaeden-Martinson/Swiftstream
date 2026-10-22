@@ -101,6 +101,8 @@ try {
   await assert.rejects(pull(conn, 'uploads/big.bin', gone, { chunkSize: MB, parallel: 2, ...stopAfter(4 * MB, 'cancel') }), { name: 'AbortError' });
   assert.ok(!fs.existsSync(`${gone}.swiftstream-part`) && !fs.existsSync(`${gone}.swiftstream-part.json`) && !fs.existsSync(gone));
   await assert.rejects(push(conn, src, 'uploads/canceled.bin', { chunkSize: MB, parallel: 2, ...stopAfter(6 * MB, 'cancel') }), { name: 'AbortError' });
+  // The server cleans up when the abort request arrives, which can be a moment after the client gave up.
+  for (let i = 0; i < 20 && fs.readdirSync(path.join(serverHome, 'uploads')).length; i++) await new Promise((r) => setTimeout(r, 100));
   assert.ok(!fs.existsSync(path.join(files, 'uploads', 'canceled.bin.swiftstream-part')), 'server kept the canceled upload');
   assert.deepEqual(fs.readdirSync(path.join(serverHome, 'uploads')), []);
   console.log('ok  canceled download and upload leave no partial files');

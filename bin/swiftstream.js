@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { DEFAULT_PORT, ensureDir, loadHosts, paths, readJson, writeJson } from '../src/config.js';
+import { DEFAULT_PORT, ensureDir, loadHosts, parsePortList, paths, readJson, writeJson } from '../src/config.js';
+import { parseShareTarget } from '../src/sni.js';
 import { authorizeKey, keyFingerprint, loadOrCreateIdentity } from '../src/keys.js';
 import { loadOrCreateServerCert } from '../src/tls.js';
 import { checkServerHealth, connectClient } from '../src/client.js';
@@ -27,6 +28,7 @@ import { describeReason, repairReason, silentReason, unreachableFromHere } from 
 const OPTIONS = {
   port: { type: 'string' },
   'web-port': { type: 'string' },
+  'share-with': { type: 'string' },
   host: { type: 'string' },
   root: { type: 'string' },
   parallel: { type: 'string' },
@@ -120,7 +122,7 @@ How do you want to connect?
 
   deploy: {
     group: 'Get started',
-    usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022] [--web-port 443]',
+    usage: 'deploy <name> <user@host> [--ssh-port 22] [--port 7022] [--web-port 443,8443] [--share-with 127.0.0.1:8444]',
     summary: 'Set up swiftstream on a server you can log in to, and save it',
     details: `Logs in over SSH once (your SSH key if you have one, otherwise your password),
 installs Node.js for your account if the server has none, uploads swiftstream, starts it in the
@@ -346,7 +348,7 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
 
   serve: {
     group: 'On the server',
-    usage: 'serve [--port 7022] [--web-port 443] [--host 0.0.0.0] [--root ~] [--daemon]',
+    usage: 'serve [--port 7022] [--web-port 443,8443] [--share-with 127.0.0.1:8444|off] [--host 0.0.0.0] [--root ~] [--daemon]',
     summary: 'Run the swiftstream server on this machine',
     async run(_args, opts) {
       const port = Number(opts.port) || DEFAULT_PORT;
@@ -354,11 +356,14 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
       if (opts.daemon) return daemonize(port, opts);
 
       const { startServer } = await import('../src/server.js');
-      const srv = await startServer({ port, host: opts.host, root: opts.root, webPort: Number(opts['web-port']) || 0 });
-      writeJson(paths.pid, { pid: process.pid, port: srv.port, webPort: srv.webPort, webPortError: srv.webPortError });
+      const shareWith = shareSetting(opts);
+      const srv = await startServer({ port, host: opts.host, root: opts.root, webPorts: parsePortList(opts['web-port']), shareWith });
+      const sharing = shareWith ? `${shareWith.host}:${shareWith.port}` : null;
+      writeJson(paths.pid, { pid: process.pid, port: srv.port, webPorts: srv.webPorts, webPortErrors: srv.webPortErrors, sharing });
       const addresses = lanAddresses();
-      ok(`swiftstream server running on port ${c.bold(srv.port)}${srv.webPort ? ` and ${c.bold(srv.webPort)}` : ''}`);
-      if (srv.webPortError) warn(`Port ${opts['web-port']} isn't available (${srv.webPortError}), so only ${srv.port} is used.`);
+      ok(`swiftstream server running on port ${c.bold(srv.port)}${srv.webPorts.length ? ` and ${srv.webPorts.map((p) => c.bold(p)).join(', ')}` : ''}`);
+      for (const [p, why] of Object.entries(srv.webPortErrors)) warn(`Port ${p} isn't available (${why}).`);
+      if (sharing && srv.webPorts.length) info(`Sharing ${srv.webPorts.join(', ')}: connections for other programs go to ${sharing}.`);
       console.log(`  Fingerprint: ${srv.fingerprint}`);
       console.log(`\n  To connect from another computer, run there:`);
       console.log(`    swiftstream add <name> ${addresses[0] || '<this-machine>'}:${srv.port}`);
@@ -403,13 +408,8 @@ Options: --parallel 8 (connections)  --chunk 4MB (chunk size)`,
     async run() {
       const pidInfo = readJson(paths.pid, null);
       if (!pidInfo) return info('No swiftstream server is running.');
-      try {
-        process.kill(pidInfo.pid);
-        ok(`Stopped the server (pid ${pidInfo.pid})`);
-      } catch {
-        info('The server had already stopped.');
-      }
-      fs.rmSync(paths.pid, { force: true });
+      if (await stopRunning(pidInfo)) ok(`Stopped the server (pid ${pidInfo.pid})`);
+      else info('The server had already stopped.');
     },
   },
 };
@@ -508,10 +508,24 @@ const fixed = (text) => console.error(`${c.green('✓')} ${text}`);
  * in again. If updating fails, the old version keeps serving and the command goes ahead.
  * SWIFTSTREAM_NO_SERVER_UPDATE=1 turns this off.
  */
+// Servers whose SSH didn't answer recently (name -> when), so commands on a network that blocks SSH
+// don't each spend 10 seconds finding that out again before updating.
+const SSH_BLOCKED_FILE = path.join(paths.dir, 'ssh-unreachable.json');
+const SSH_RETRY_MS = 15 * 60_000;
+const sshRecentlyBlocked = (name) => Date.now() - (readJson(SSH_BLOCKED_FILE, {})[name] || 0) < SSH_RETRY_MS;
+function noteSshBlocked(name, blocked) {
+  const all = readJson(SSH_BLOCKED_FILE, {});
+  if (blocked) all[name] = Date.now();
+  else if (!(name in all)) return;
+  else delete all[name];
+  writeJson(SSH_BLOCKED_FILE, all);
+}
+
 async function updateIfOlder(name, conn, opts) {
   const host = loadHosts()[name];
   const from = conn.serverVersion;
   if (!host?.ssh || !from || !isOlderVersion(from, VERSION) || process.env.SWIFTSTREAM_NO_SERVER_UPDATE) return conn;
+  if (sshRecentlyBlocked(name)) return conn; // tried in the last 15 minutes: SSH doesn't get through here
   info(`${name} runs Swiftstream ${from}; updating it to ${VERSION}…`);
   try {
     const { info: remote, webNote } = await deployHost({
@@ -523,11 +537,14 @@ async function updateIfOlder(name, conn, opts) {
       confirmHostKey: async () => false,
     });
     conn.close();
+    noteSshBlocked(name, false);
     fixed(`Updated Swiftstream on ${name} from ${from} to ${remote?.version || VERSION}`);
     if (webNote) warn(webNote);
     return client(name, opts);
   } catch (err) {
-    warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Using ${from} for now.`);
+    const blocked = err.code === 'SSH_UNREACHABLE';
+    if (blocked) noteSshBlocked(name, true);
+    warn(`Couldn't update Swiftstream on ${name} (${err.message.split(/\r?\n/)[0]}). Using ${from} for now${blocked ? '; trying again in 15 minutes' : ''}.`);
     return conn;
   }
 }
@@ -539,7 +556,8 @@ async function deployCommand(name, target, opts, { quiet = false, keyOnly = fals
     target,
     sshPort: opts['ssh-port'],
     port: Number(opts.port) || DEFAULT_PORT,
-    webPort: opts['web-port'] === undefined ? undefined : Number(opts['web-port']) || 0,
+    webPorts: opts['web-port'] === undefined ? undefined : parsePortList(opts['web-port']),
+    shareWith: opts['share-with'],
     identityFile,
     askPassword: (attempt) =>
       keyOnly
@@ -565,7 +583,7 @@ async function deployCommand(name, target, opts, { quiet = false, keyOnly = fals
     onStep: (text) => info(`${text}…`),
   });
   ok(`${c.bold(name)} is ready: ${remote.hostname} (${remote.platform}) at ${new URL(host.url).host}`);
-  if (host.webUrl) info(`Also on port ${new URL(host.webUrl).port || 443}, for networks that block ${new URL(host.url).port || DEFAULT_PORT}.`);
+  if (host.webUrls?.length) info(`Also on port ${host.webUrls.map((u) => new URL(u).port || 443).join(' and ')}, for networks that block ${new URL(host.url).port || DEFAULT_PORT}.`);
   if (webNote) warn(webNote);
   if (!quiet) nextSteps(name);
 }
@@ -632,15 +650,48 @@ function help(commandName) {
 }
 
 /** Start the server in the background (surviving the ssh session that launched it) and print its ready line. */
+/**
+ * Sharing the web ports (--share-with), saved in serve.json so restarts, updates and @reboot keep it:
+ * an address sets it, "off" clears it, and without the option the saved one applies.
+ */
+function shareSetting(opts) {
+  if (opts['share-with'] === undefined) return readJson(paths.serveConfig, {}).shareWith || null;
+  const target = parseShareTarget(opts['share-with']);
+  if (target === undefined) throw new UserError(`"${opts['share-with']}" isn't an address to share with.`, 'Use a port or host:port, like 127.0.0.1:8444, or "off".');
+  writeJson(paths.serveConfig, { ...readJson(paths.serveConfig, {}), shareWith: target });
+  return target;
+}
+
+/** Stop the background server and wait (up to 10s) for its port to close. False if it wasn't running. */
+async function stopRunning(pidInfo) {
+  let killed = true;
+  try {
+    process.kill(pidInfo.pid);
+  } catch (err) {
+    killed = false;
+    if (err.code !== 'ESRCH') console.error(`Couldn't stop pid ${pidInfo.pid}: ${err.code || err.message}`);
+  }
+  fs.rmSync(paths.pid, { force: true });
+  const deadline = Date.now() + 10_000;
+  while (killed && pidInfo.port && (await portOpen(pidInfo.port)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+  return killed;
+}
+
 async function daemonize(port, opts) {
   const { cert, fingerprint } = loadOrCreateServerCert();
+  // Running, but asked to share differently than it does: start it again with the new setting.
+  const shareWith = shareSetting(opts);
+  const wanted = shareWith ? `${shareWith.host}:${shareWith.port}` : null;
+  const runningNow = readJson(paths.pid, null);
+  if (runningNow && (await portOpen(port)) && (runningNow.sharing || null) !== wanted) await stopRunning(runningNow);
   if (!(await portOpen(port))) {
     ensureDir();
     fs.rmSync(paths.pid, { force: true });
     const logFd = fs.openSync(paths.log, 'a');
     const [exe, ...selfArgs] = selfCommand();
     const childArgs = [...selfArgs, 'serve', '--port', String(port)];
-    if (Number(opts['web-port'])) childArgs.push('--web-port', String(Number(opts['web-port'])));
+    const webPorts = parsePortList(opts['web-port']);
+    if (webPorts.length) childArgs.push('--web-port', webPorts.join(','));
     if (opts.host) childArgs.push('--host', opts.host);
     if (opts.root) childArgs.push('--root', opts.root);
     const child = spawn(exe, childArgs, { detached: true, stdio: ['ignore', logFd, logFd], windowsHide: true });
@@ -654,7 +705,7 @@ async function daemonize(port, opts) {
   }
   // Already running: report the ports it was started with.
   const running = readJson(paths.pid, null) || {};
-  console.log(readyLine({ port, fingerprint, cert, webPort: running.webPort || null, webPortError: running.webPortError || null }));
+  console.log(readyLine({ port, fingerprint, cert, webPorts: running.webPorts || (running.webPort ? [running.webPort] : []), webPortErrors: running.webPortErrors || {}, sharing: running.sharing || null }));
 }
 
 function portOpen(port) {

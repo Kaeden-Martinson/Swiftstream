@@ -17,7 +17,23 @@ sudo ufw allow 7022/tcp
 On AWS, Google Cloud, Azure, OVH and similar, also allow TCP 7022 in the server's network rules.
 
 **Setup says "Port 443 … is used by another program" or "needs permission"**
-Swiftstream also listens on 443 so networks that block 7022 (school, work and public Wi-Fi) can still reach it. If a web server already uses 443 there, Swiftstream keeps to 7022: it works everywhere except on those networks. For "needs permission", run the `sudo setcap …` line setup printed on the server, then connect again: it lets Swiftstream's own copy of Node.js (nothing else) use ports below 1024. Then the next setup or update restarts Swiftstream with port 443 added.
+Swiftstream also listens on 443 and 8443 so networks that block 7022 (school, work and public Wi-Fi) can still reach it. If a website already uses 443, Swiftstream uses 8443, which most of those networks also allow. To use 443 as well, share it (below). For "needs permission", run the `sudo setcap …` line setup printed on the server, then connect again: it lets Swiftstream's own copy of Node.js (nothing else) use ports below 1024.
+
+### Sharing port 443 with a website
+
+Swiftstream can take port 443 and pass every connection that isn't its own on to your website, untouched and still encrypted. Each TLS connection starts by naming the server it wants (SNI): Swiftstream's clients name `swiftstream`, browsers name your site's domain, so the two never mix. Your website keeps its certificate and its visitors; nothing is decrypted on the way.
+
+1. Move the website off 443 to a local port, for example `127.0.0.1:8444`. With nginx, change `listen 443 ssl;` to `listen 127.0.0.1:8444 ssl;` and reload. With Docker, publish `127.0.0.1:8444:443` instead of `443:443`. With Caddy, set `https_port 8444` in its global options.
+2. From your computer, on a network where SSH works:
+   ```bash
+   swiftstream deploy <name> <user@host> --share-with 127.0.0.1:8444
+   ```
+   Swiftstream starts listening on 443 and forwards everything else to 8444. The setting is saved on the server (`~/.swiftstream/serve.json`), so updates, repairs and reboots keep it.
+3. Check the website still loads in a browser.
+
+Things to know: while sharing, the website is only reachable on 443 when Swiftstream is running (it restarts on boot from cron, and the app restarts it if it stops). The website sees visitors as coming from `127.0.0.1`, so its logs and any per-visitor limits lose their real addresses. To stop sharing, run the same command with `--share-with off`, then move the website back to 443.
+
+If you'd rather your own proxy does the routing, any proxy that routes TLS by SNI without decrypting works: nginx's `stream` module with `ssl_preread on` (send `$ssl_preread_server_name` `swiftstream` to `127.0.0.1:7022`), HAProxy with `req.ssl_sni`, or a Traefik TCP router with `` HostSNI(`swiftstream`) `` and `passthrough: true`.
 
 **"SSH host key has changed"**
 The server's SSH identity is different from the first time you connected. That's expected after reinstalling a server, and suspicious otherwise. If you reinstalled it, remove its line from `~/.swiftstream/ssh_known_hosts.json` and set it up again.

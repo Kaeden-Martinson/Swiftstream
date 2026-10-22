@@ -112,9 +112,9 @@ const unanswered = (err) => UNANSWERED.includes(err?.code) || /timed out|socket 
 // The address that last worked for each server (main URL -> URL), tried first next time.
 const lastWorking = new Map();
 
-/** A server's addresses: the main one, then the web port's (443) if it has one; the one that last worked first. */
+/** A server's addresses: the main one, then its web ports' (443, 8443); the one that last worked first. */
 export function serverUrls(host) {
-  const urls = [host.url, host.webUrl].filter(Boolean);
+  const urls = [...new Set([host.url, ...(host.webUrls || []), host.webUrl].filter(Boolean))];
   const last = lastWorking.get(host.url);
   return last && urls.includes(last) ? [last, ...urls.filter((u) => u !== last)] : urls;
 }

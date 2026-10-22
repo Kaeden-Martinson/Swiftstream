@@ -4,6 +4,7 @@ import os from 'node:os';
 import tls from 'node:tls';
 import selfsigned from 'selfsigned';
 import { ensureDir, paths } from './config.js';
+import { SWIFTSTREAM_SNI } from './sni.js';
 
 /** The server's long-lived identity: a self-signed cert, pinned by clients like an SSH host key. */
 export function loadOrCreateServerCert() {
@@ -28,6 +29,9 @@ export function loadOrCreateServerCert() {
  */
 export function pinnedTlsOptions(host) {
   return {
+    // Names Swiftstream in the TLS hello, so a port it shares with a website can tell its connections
+    // apart without decrypting anything (see sni.js). Swiftstream itself doesn't check it.
+    servername: SWIFTSTREAM_SNI,
     ca: host.cert,
     rejectUnauthorized: true,
     checkServerIdentity: (_hostname, cert) =>

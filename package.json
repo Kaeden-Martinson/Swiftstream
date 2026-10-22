@@ -1,6 +1,6 @@
 {
   "name": "swiftstream",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Terminal and fast, resumable file transfer for your servers: sign in over SSH once, then everything goes over HTTPS on parallel connections.",
   "keywords": [
     "ssh",

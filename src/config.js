@@ -29,12 +29,19 @@ export const paths = {
   uploads: path.join(HOME_DIR, 'uploads'),
   pid: path.join(HOME_DIR, 'server.pid'),
   log: path.join(HOME_DIR, 'server.log'),
+  serveConfig: path.join(HOME_DIR, 'serve.json'), // server settings that outlive restarts (sharing a port)
 };
 
 export const DEFAULT_PORT = 7022;
-// Also served on 443 where possible: networks that only let web traffic out (school, work) allow it.
-// SWIFTSTREAM_WEB_PORT changes it (0 for none), e.g. for tests, which must not take the real 443.
-export const DEFAULT_WEB_PORT = process.env.SWIFTSTREAM_WEB_PORT !== undefined ? Number(process.env.SWIFTSTREAM_WEB_PORT) || 0 : 443;
+/** "443,8443" -> [443, 8443]; "0", "" or "off" -> []. */
+export function parsePortList(value) {
+  return [...new Set(String(value ?? '').split(/[\s,]+/).map(Number).filter((p) => Number.isInteger(p) && p > 0 && p < 65536))];
+}
+
+// Also served on 443 and 8443 where possible: networks that only let web traffic out (school, work)
+// allow 443, and many allow 8443, which needs no root. SWIFTSTREAM_WEB_PORT changes them ("0" for none),
+// e.g. for tests, which must not take the real 443.
+export const DEFAULT_WEB_PORTS = parsePortList(process.env.SWIFTSTREAM_WEB_PORT ?? '443,8443');
 
 export function ensureDir(dir = HOME_DIR) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

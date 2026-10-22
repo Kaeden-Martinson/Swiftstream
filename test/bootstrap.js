@@ -3,12 +3,14 @@
 // Needs a POSIX `sh` on PATH (Linux, macOS, or Git Bash on Windows); skipped otherwise.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import https from 'node:https';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ssh2 from 'ssh2';
+import selfsigned from 'selfsigned';
 import { checkServerHealth } from '../src/client.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -146,35 +148,67 @@ try {
   assert.equal(fs.readFileSync(path.join(users.tester.home, '.ssh', 'authorized_keys'), 'utf8'), authorized); // not added twice
   console.log('ok  restart over SSH with no password, no re-upload');
 
-  // The web port (443 on real servers; a free port here): setup restarts Swiftstream to add it and
-  // saves its address. When the main port is blocked, the client connects through it instead.
+  // Web ports (443 and 8443 on real servers; free ports here): setup restarts Swiftstream to add them
+  // and saves their addresses. When the main port is blocked, the client connects through one of them.
+  const hostsFile = path.join(clientHome, 'hosts.json');
   const webPort = await freePort();
-  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '', env: { SWIFTSTREAM_WEB_PORT: String(webPort) } });
-  assert.match(r.err, new RegExp(`Restarting Swiftstream to add port ${webPort}`));
+  const taken = await freePort();
+  const squatter = net.createServer().listen(taken, '0.0.0.0'); // a web server already on this one
+  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '', env: { SWIFTSTREAM_WEB_PORT: `${taken},${webPort}` } });
+  squatter.close();
+  assert.match(r.err, new RegExp(`Restarting Swiftstream to add port ${taken} and ${webPort}`));
   assert.match(r.err, new RegExp(`Also on port ${webPort}, for networks that block ${swiftPort}`));
-  const withWeb = fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8');
-  assert.equal(JSON.parse(withWeb).box.webUrl, `https://127.0.0.1:${webPort}`);
+  assert.match(r.err, new RegExp(`Port ${taken} on 127\\.0\\.0\\.1 is used by another program \\(a web server\\?\\), so Swiftstream uses ${webPort} instead`));
+  const withWeb = fs.readFileSync(hostsFile, 'utf8');
+  assert.deepEqual(JSON.parse(withWeb).box.webUrls, [`https://127.0.0.1:${webPort}`]);
   const blocked = JSON.parse(withWeb);
   blocked.box.url = `https://127.0.0.1:${await freePort()}`; // nothing there: refused, like 7022 at school
-  fs.writeFileSync(path.join(clientHome, 'hosts.json'), JSON.stringify(blocked));
+  blocked.box.webUrls.unshift(`https://127.0.0.1:${await freePort()}`); // and the first web port too
+  fs.writeFileSync(hostsFile, JSON.stringify(blocked));
   r = await ok(['exec', 'box', '--', 'echo', 'through-the-web-port']);
-  fs.writeFileSync(path.join(clientHome, 'hosts.json'), withWeb);
+  fs.writeFileSync(hostsFile, withWeb);
   assert.match(r.out, /through-the-web-port/);
   assert.doesNotMatch(r.err, /Checking it over SSH/);
   assert.equal((await checkServerHealth(blocked.box)).up, true);
-  console.log('ok  web port: added by setup, used when the main port is blocked');
+  console.log('ok  web ports: a taken one skipped and explained, the next used when the main port is blocked');
 
-  // Web port taken by another program (a web server on 443): Swiftstream runs on its main port and says so.
-  const taken = await freePort();
-  const squatter = net.createServer().listen(taken, '0.0.0.0');
+  // Sharing a web port with a website: the website moves to another port, Swiftstream takes the shared
+  // one, keeps the connections that name it (SNI) and passes the rest on, still encrypted.
+  const site = selfsigned.generate([{ name: 'commonName', value: 'example.test' }], { keySize: 2048, days: 1, algorithm: 'sha256' });
+  const sitePort = await freePort();
+  const website = https.createServer({ key: site.private, cert: site.cert }, (req, res) => res.end(`website ${req.url}`)).listen(sitePort, '127.0.0.1');
+  const shared = await freePort();
+  const shareDeploy = (extra = []) =>
+    ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes', ...extra], { input: '', env: { SWIFTSTREAM_WEB_PORT: String(shared) } });
+  const visitSite = () =>
+    new Promise((resolve, reject) => {
+      const req = https.get({ host: '127.0.0.1', port: shared, path: '/hello', servername: 'example.test', rejectUnauthorized: false }, (res) => {
+        let body = '';
+        const cert = res.socket.getPeerCertificate().subject?.CN;
+        res.on('data', (d) => (body += d));
+        res.on('end', () => resolve({ body, cert }));
+      });
+      req.on('error', reject);
+    });
+  r = await shareDeploy(['--share-with', `127.0.0.1:${sitePort}`]);
+  assert.match(r.err, new RegExp(`Also on port ${shared}`));
+  assert.deepEqual(await visitSite(), { body: 'website /hello', cert: 'example.test' });
+  const sharedOnly = JSON.parse(fs.readFileSync(hostsFile, 'utf8'));
+  sharedOnly.box.url = `https://127.0.0.1:${await freePort()}`; // main port blocked: only the shared one left
+  const savedHosts = fs.readFileSync(hostsFile, 'utf8');
+  fs.writeFileSync(hostsFile, JSON.stringify(sharedOnly));
+  r = await ok(['exec', 'box', '--', 'echo', 'through-the-shared-port']);
+  fs.writeFileSync(hostsFile, savedHosts);
+  assert.match(r.out, /through-the-shared-port/);
+  assert.doesNotMatch(r.err, /Checking it over SSH/); // through the shared port itself, not a repair
+  // The setting is kept on the server: a later setup (an update or repair) still shares.
   stopRemote(users.tester);
-  r = await ok(['deploy', 'box', target, '--ssh-port', String(sshPort), '--port', String(swiftPort), '--yes'], { input: '', env: { SWIFTSTREAM_WEB_PORT: String(taken) } });
-  squatter.close();
-  assert.match(r.err, new RegExp(`Port ${taken} on 127\\.0\\.0\\.1 is used by another program`));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(clientHome, 'hosts.json'), 'utf8')).box.webUrl, undefined);
-  r = await ok(['exec', 'box', '--', 'echo', 'main-port-only']);
-  assert.match(r.out, /main-port-only/);
-  console.log('ok  web port taken: runs on the main port and says why');
+  await shareDeploy();
+  assert.equal((await visitSite()).body, 'website /hello');
+  r = await shareDeploy(['--share-with', 'off']);
+  assert.notEqual((await visitSite()).cert, 'example.test'); // Swiftstream answers everything itself again
+  website.close();
+  console.log('ok  sharing a web port: the website keeps its visitors, Swiftstream gets its own, kept across restarts');
 
   // Reconnecting: HTTPS fails, so the CLI logs in over SSH with this computer's key (no password),
   // finds what's wrong, fixes it, says what it was, and the command goes ahead.
@@ -190,17 +224,17 @@ try {
   assert.equal(health.up, true);
   assert.equal(health.version, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   stopRemote(users.tester);
-  assert.equal((await checkServerHealth(savedBox)).up, false);
+  const afterStop = await checkServerHealth(savedBox);
+  assert.equal(afterStop.up, false);
   console.log('ok  health check answers without a login, and not once stopped');
 
   // Swiftstream's port and SSH both silent (as on Wi-Fi that blocks them): say it's probably the network.
-  const hostsFile = path.join(clientHome, 'hosts.json');
-  const savedHosts = fs.readFileSync(hostsFile, 'utf8');
-  const unroutable = JSON.parse(savedHosts);
+  const beforeUnroutable = fs.readFileSync(hostsFile, 'utf8');
+  const unroutable = JSON.parse(beforeUnroutable);
   unroutable.box.ssh = 'tester@10.255.255.1'; // nothing answers there: times out, or "network unreachable"
   fs.writeFileSync(hostsFile, JSON.stringify(unroutable));
   r = await run(['exec', 'box', '--', 'echo', 'never']);
-  fs.writeFileSync(hostsFile, savedHosts);
+  fs.writeFileSync(hostsFile, beforeUnroutable);
   assert.notEqual(r.code, 0);
   assert.match(r.err, /Can't reach box from this network: Swiftstream \(port \d+( or \d+)?\) and SSH \(port \d+\) both don't answer/);
   console.log('ok  Swiftstream and SSH both unreachable: blames the network, not the server');

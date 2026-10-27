@@ -4,6 +4,10 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-10-26
+
+- Fixed: in the desktop app, uploading or downloading a folder with an `.asar` file in it (like an Electron app's `resources/app.asar`) failed with "ENOENT, not found in …app.asar". Electron opens `.asar` files as folders; transfers now use its plain file functions.
+
 ## [0.1.9] - 2026-10-22
 
 - Servers can update themselves (opt-in): `swiftstream auto-update <name> on`, or **Turn on automatic updates** in the app's server menu. The server checks GitHub Releases every 6 hours, verifies a newer version against the release's checksums and that it runs, and restarts on it once nobody is using it, putting the previous version back if the new one doesn't start. The setting works over HTTPS, so it can be changed from networks that block SSH.

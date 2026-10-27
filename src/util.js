@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import fsp from 'node:fs/promises';
+import { fs, fsp } from './localfs.js';
 import path from 'node:path';
 import { UserError } from './errors.js';
 

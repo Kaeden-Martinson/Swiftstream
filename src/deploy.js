@@ -368,6 +368,7 @@ function run(conn, command, { stdin } = {}) {
 // ---- server facts and Node.js -------------------------------------------------
 
 const PROBE = `
+PATH="$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 D="$HOME/.swiftstream"
 node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 18 ] 2>/dev/null; }
 N=""
@@ -383,21 +384,35 @@ if ls /lib/ld-musl-* >/dev/null 2>&1; then echo "libc=musl"; else echo "libc=gli
 for pm in xbps-install apt-get dnf yum apk pacman zypper brew; do command -v $pm >/dev/null 2>&1 && { echo "pm=$pm"; break; }; done
 echo "uid=$(id -u)"
 command -v sudo >/dev/null 2>&1 && echo "sudo=1"
-if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; fi
+if command -v curl >/dev/null 2>&1; then echo "fetch=curl"; elif command -v wget >/dev/null 2>&1; then echo "fetch=wget"; elif command -v python3 >/dev/null 2>&1; then echo "fetch=python3"; fi
 if [ -f "$D/server.pid" ]; then p=$(tr -dc '0-9,' < "$D/server.pid" | cut -d, -f1); [ -n "$p" ] && kill -0 "$p" 2>/dev/null && echo "running=1"; fi
 echo "unpriv_from=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null)"
 if [ -f "$D/bin/swiftstream.cjs" ]; then echo "bundle_sha=$( (sha256sum "$D/bin/swiftstream.cjs" 2>/dev/null || shasum -a 256 "$D/bin/swiftstream.cjs") | cut -d' ' -f1)"; fi
 `;
 
 async function probe(conn) {
-  const { stdout } = await run(conn, 'sh -s', { stdin: PROBE });
+  const { code, stdout, stderr } = await run(conn, 'sh -s', { stdin: PROBE });
   const facts = {};
   for (const line of stdout.split(/\r?\n/)) {
     const i = line.indexOf('=');
     if (i > 0) facts[line.slice(0, i)] = line.slice(i + 1).trim();
   }
+  // The probe always reports the system's name. Without it the login worked but the server wouldn't run commands.
+  if (!facts.os) {
+    const said = `${stderr}\n${stdout}`.trim();
+    if (/(change|new|expired).*password|password.*(change|expired)/i.test(said)) {
+      throw new UserError(
+        'The server wants a new password for this account before it will run anything.',
+        'Log in once with ssh, choose a new password when asked, then set up the server again.',
+      );
+    }
+    throw new UserError("The server accepted the login but wouldn't run commands.", said ? `It said: ${lastWords(said)}` : `It gave no reason (exit code ${code}).`);
+  }
   return facts;
 }
+
+/** The end of what a command printed, short enough to show in an error message. */
+const lastWords = (text) => text.trim().slice(-300);
 
 // Official Node.js builds are glibc-only; they need no root because they unpack into ~/.swiftstream/runtime.
 const NODE_DOWNLOAD = `
@@ -406,7 +421,11 @@ D="$HOME/.swiftstream"; mkdir -p "$D"
 case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) echo "unsupported system $(uname -s)" >&2; exit 3 ;; esac
 case "$(uname -m)" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported CPU $(uname -m)" >&2; exit 3 ;; esac
 base=https://nodejs.org/dist/latest-v22.x
-fetch() { if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"; else wget -qO- "$1"; fi; }
+fetch() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"
+  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"
+  else python3 -c 'import shutil, sys, urllib.request; shutil.copyfileobj(urllib.request.urlopen(sys.argv[1]), sys.stdout.buffer)' "$1"; fi
+}
 line=$(fetch "$base/SHASUMS256.txt" | grep " node-v[0-9.]*-$os-$arch.tar.gz$")
 sum=\${line%% *}; file=\${line##* }
 [ -n "$file" ] || { echo "no Node.js build for $os-$arch" >&2; exit 3; }
@@ -415,6 +434,7 @@ fetch "$base/$file" > "$tmp/node.tar.gz"
 actual=$( (sha256sum "$tmp/node.tar.gz" 2>/dev/null || shasum -a 256 "$tmp/node.tar.gz") | cut -d' ' -f1)
 [ "$actual" = "$sum" ] || { echo "Node.js download failed its checksum" >&2; exit 4; }
 tar -xzf "$tmp/node.tar.gz" -C "$tmp" --strip-components=1
+"$tmp/bin/node" --version >/dev/null || { rm -rf "$tmp"; echo "the downloaded Node.js doesn't run on this system" >&2; exit 5; }
 rm -f "$tmp/node.tar.gz"; rm -rf "$D/runtime"; mv "$tmp" "$D/runtime"
 echo "$D/runtime/bin/node"
 `;
@@ -433,11 +453,15 @@ const PACKAGE_INSTALL = {
 const canDownloadNode = (facts) => facts.libc === 'glibc' && /^(Linux|Darwin)$/.test(facts.os) && /^(x86_64|amd64|aarch64|arm64)$/.test(facts.arch) && !!facts.fetch;
 
 async function installNode(conn, facts, onStep, sudoPassword) {
+  const tried = [];
   if (canDownloadNode(facts)) {
     onStep('Installing Node.js for your account (one time)');
     const res = await run(conn, 'sh -s', { stdin: NODE_DOWNLOAD });
     const nodePath = res.stdout.trim().split('\n').pop();
     if (res.code === 0 && nodePath) return nodePath;
+    tried.push(`Downloading it: ${lastWords(res.stderr) || `exit code ${res.code}`}`);
+  } else {
+    tried.push(`Downloading it: not possible here (${facts.os} ${facts.arch}, ${facts.libc}, ${facts.fetch ? `using ${facts.fetch}` : 'no curl, wget or python3'})`);
   }
 
   const installCmd = PACKAGE_INSTALL[facts.pm];
@@ -454,13 +478,18 @@ async function installNode(conn, facts, onStep, sudoPassword) {
     if (res.code === 0) {
       const again = await probe(conn);
       if (again.node) return again.node;
+      tried.push(`${facts.pm}: it installed a Node.js older than 18`);
+    } else {
+      tried.push(`${facts.pm}: ${lastWords(res.stderr) || `exit code ${res.code}`}`);
     }
+  } else {
+    tried.push(installCmd ? `${facts.pm}: needs root or sudo` : 'Package manager: none found');
   }
 
   const manual = installCmd ? `sudo ${installCmd}` : 'install Node.js 18 or newer with your package manager';
   throw new UserError(
     `Node.js 18 or newer isn't installed on the server, and Swiftstream couldn't install it automatically.`,
-    `On the server run:\n  ${manual}\nthen connect again.`,
+    `${tried.join('\n')}\nOn the server run:\n  ${manual}\nthen connect again.`,
   );
 }
 

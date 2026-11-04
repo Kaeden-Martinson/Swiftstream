@@ -41,6 +41,17 @@ const freePort = () =>
 
 // ---- a minimal SSH server: password auth, exec runs `sh -c` as that user's "home" ----
 const users = { tester: { password: 's3cret', home: path.join(work, 'home-tester') }, second: { password: 'hunter2', home: path.join(work, 'home-second') }, third: { password: 'pa55', home: path.join(work, 'home-third') } };
+// Accounts on servers we can't be here: their commands get these answers, in order, instead of running.
+const scripted = (name, answers) => (users[name] = { password: 'pw', home: path.join(work, `home-${name}`), answers });
+const noNodeProbe = 'os=Linux\narch=x86_64\nlibc=glibc\nuid=1000\nfetch=curl\nnode=\n';
+scripted('expired', [{ err: 'You must change your password now.\nPassword change required but no TTY available.\n', code: 1 }]);
+scripted('refused', [{ err: 'This account is not allowed to run commands.\n', code: 1 }]);
+scripted('nonode', [{ out: noNodeProbe }, { err: 'curl: (6) Could not resolve host: nodejs.org\n', code: 6 }]);
+scripted('oldnode', [
+  { out: `${noNodeProbe}pm=apt-get\nsudo=1\n` },
+  { err: 'curl: (6) Could not resolve host: nodejs.org\n', code: 6 },
+  { err: 'sudo: a password is required\n', code: 1 },
+]);
 for (const u of Object.values(users)) fs.mkdirSync(u.home, { recursive: true });
 
 function startSshServer(port, hostKey) {
@@ -67,6 +78,15 @@ function startSshServer(port, hostKey) {
     client.on('session', (accept) => {
       accept().on('exec', (acceptExec, _reject, info) => {
         const stream = acceptExec();
+        if (user.answers) {
+          const { out = '', err = '', code = 0 } = user.answers.shift() ?? { err: `unexpected command: ${info.command}\n`, code: 127 };
+          stream.resume();
+          stream.stderr.write(err);
+          stream.write(out);
+          stream.exit(code);
+          stream.end();
+          return;
+        }
         const home = user.home.split(path.sep).join('/');
         const env = { ...process.env, HOME: home, USERPROFILE: user.home, SWIFTSTREAM_HOME: path.join(user.home, '.swiftstream') };
         delete env.SSH_AUTH_SOCK;
@@ -367,6 +387,26 @@ try {
   r = await run(['import', 'lab'], { env: homeEnv });
   assert.match(r.err, /already saved: lab/);
   console.log('ok  ~/.ssh/config alias: connect sets it up; import skips saved hosts');
+
+  // A server that won't run anything, or where Node.js can't be installed, says why.
+  const setup = (name) => run(['deploy', name, `${name}@127.0.0.1`, '--ssh-port', String(sshPort), '--yes'], { input: 'pw\n' });
+  r = await setup('expired');
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /wants a new password/);
+  assert.doesNotMatch(r.err, /Node\.js/);
+  r = await setup('refused');
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /wouldn't run commands/);
+  assert.match(r.err, /not allowed to run commands/);
+  r = await setup('nonode');
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /couldn't install it automatically/);
+  assert.match(r.err, /Could not resolve host: nodejs\.org/);
+  assert.match(r.err, /none found/);
+  r = await setup('oldnode');
+  assert.notEqual(r.code, 0);
+  assert.match(r.err, /apt-get: sudo: a password is required/);
+  console.log('ok  a server that refuses commands or a failed Node.js install gives the real reason');
 
   // A different SSH host key on the same address must be refused.
   sshServer.close();

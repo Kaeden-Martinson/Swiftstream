@@ -6,6 +6,11 @@ What changed in each version. The release workflow copies a version's section in
 
 - Fixed: terminals on servers without `node-pty` (the usual case for servers set up by the app) kept the size they opened with, so after resizing the window, splitting or changing the text size, programs drew past the edge and the output scrolled. The server now uses `python3` for the terminal when it's there, which follows resizes. The app also re-sends the size once a terminal connects, since changes made while it was connecting were lost.
 
+## [0.1.11] - 2026-11-04
+
+- Setup says why it couldn't continue. A server that accepts the login but won't run commands (often one that wants a new password on first login) no longer shows up as "Node.js isn't installed", and a failed Node.js install lists what was tried and what went wrong.
+- Installing Node.js works on more servers: it can download with python3 when curl and wget are missing, finds package managers outside the login's `PATH`, and checks that the download runs before using it.
+
 ## [0.1.10] - 2026-10-26
 
 - Fixed: in the desktop app, uploading or downloading a folder with an `.asar` file in it (like an Electron app's `resources/app.asar`) failed with "ENOENT, not found in …app.asar". Electron opens `.asar` files as folders; transfers now use its plain file functions.

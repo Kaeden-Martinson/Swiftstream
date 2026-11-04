@@ -280,9 +280,10 @@ export async function startServer({ port, host = '0.0.0.0', root = os.homedir(),
       if (!/^[a-f0-9]{32}$/.test(id || '')) throw new HttpError(400, 'bad id');
       const statePath = path.join(paths.uploads, `${id}.json`);
       const state = uploads.get(id) || readJson(statePath, null);
+      // Forget it before deleting: a chunk that finishes during the deletes must see it's canceled, not save it again.
+      uploads.delete(id);
       if (state) await fsp.rm(state.partPath, { force: true });
       await fsp.rm(statePath, { force: true });
-      uploads.delete(id);
       return { ok: true };
     },
 

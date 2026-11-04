@@ -107,7 +107,8 @@ The next step for lossy links is HTTP/3 (QUIC). It recovers from packet loss per
 Shells get a real terminal, so vim, htop and Ctrl+C work:
 
 - with `node-pty` when it's installed (the Void installer builds it);
-- otherwise with the system's `script` command (Linux and macOS), where the size is set when the shell opens but later window resizes aren't passed through;
+- otherwise with `python3` (Linux and macOS), which also follows window resizes;
+- otherwise with the system's `script` command, where the size is set when the shell opens but later window resizes aren't passed through;
 - as a last resort, plain pipes.
 
 ## Standalone executable

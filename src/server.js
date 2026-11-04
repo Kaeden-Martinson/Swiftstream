@@ -588,6 +588,47 @@ function scriptCommand(shell, cmd, cols, rows) {
   return flavor === 'linux' ? ['script', ['-qfc', inner, '/dev/null']] : ['script', ['-q', '/dev/null', 'sh', '-c', inner]];
 }
 
+// A pseudo-terminal that follows window resizes, for servers without node-pty. Run as
+// `python3 -c PTY_RELAY rows cols program args…`; each "rows cols" line on fd 3 resizes it.
+const PTY_RELAY = `
+import os, sys, pty, select, fcntl, termios, struct, signal, threading
+def resize(fd, rows, cols): fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', int(rows), int(cols), 0, 0))
+def finish(status): sys.exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status))
+pid, master = pty.fork()
+if pid == 0:
+    os.close(3)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    resize(0, sys.argv[1], sys.argv[2])
+    os.execvp(sys.argv[3], sys.argv[3:])
+def keys():
+    for data in iter(lambda: os.read(0, 65536), b''): os.write(master, data)
+threading.Thread(target=keys, daemon=True).start()
+watch = [master, 3]
+while True:
+    ready = select.select(watch, [], [], 1)[0]
+    if not ready:
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done: finish(status)
+    if 3 in ready:
+        sizes = os.read(3, 4096).split()
+        if sizes: resize(master, *sizes[-2:])
+        else: watch.remove(3)
+    if master in ready:
+        try: data = os.read(master, 65536)
+        except OSError: data = b''
+        if not data: finish(os.waitpid(pid, 0)[1])
+        os.write(1, data)
+`;
+
+let pythonPty;
+function hasPythonPty() {
+  if (pythonPty !== undefined) return pythonPty;
+  const runs = (file, args) => spawnSync(file, args, { stdio: 'ignore', timeout: 5000 }).status === 0;
+  // On a Mac without the developer tools, python3 is a stand-in that pops up an installer instead.
+  pythonPty = process.platform !== 'win32' && (process.platform !== 'darwin' || runs('xcode-select', ['-p'])) && runs('python3', ['-I', '-c', 'import pty']);
+  return pythonPty;
+}
+
 function runShell(ws, url, { root, pty }) {
   const cmd = url.searchParams.get('cmd');
   const cols = Number(url.searchParams.get('cols')) || 80;
@@ -596,8 +637,9 @@ function runShell(ws, url, { root, pty }) {
   const wantPty = ptyRequested && !!pty;
   const isWin = process.platform === 'win32';
   const shell = isWin ? process.env.ComSpec || 'cmd.exe' : process.env.SHELL || '/bin/sh';
-  // Without node-pty, the system "script" command still gives a real terminal on Linux and macOS.
-  const viaScript = ptyRequested && !wantPty && !!scriptCommand(shell, cmd, cols, rows);
+  // Without node-pty, python3 or else the system "script" command still gives a real terminal on Linux and macOS.
+  const viaPython = ptyRequested && !wantPty && hasPythonPty();
+  const viaScript = ptyRequested && !wantPty && !viaPython && !!scriptCommand(shell, cmd, cols, rows);
   const control = (msg) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
   // Binary frames carry a 1-byte stream id: 0 = stdin, 1 = stdout, 2 = stderr.
   const out = (streamId, data) => ws.readyState === ws.OPEN && ws.send(Buffer.concat([Buffer.from([streamId]), Buffer.from(data)]));
@@ -609,7 +651,7 @@ function runShell(ws, url, { root, pty }) {
     ws.close();
   };
 
-  control({ type: 'hello', pty: wantPty || viaScript, platform: process.platform });
+  control({ type: 'hello', pty: wantPty || viaPython || viaScript, platform: process.platform });
 
   // Shells get a color terminal. Swiftstream itself runs with NO_COLOR=1 (plain logs), which must not
   // reach the shell, or pm2, git, npm and friends turn their colors off.
@@ -631,7 +673,11 @@ function runShell(ws, url, { root, pty }) {
   }
 
   let child;
-  if (viaScript) {
+  if (viaPython) {
+    const program = cmd ? ['sh', '-c', cmd] : [shell, '-l'];
+    child = spawn('python3', ['-I', '-c', PTY_RELAY, `${rows}`, `${cols}`, ...program], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] });
+    child.stdio[3].on('error', () => {});
+  } else if (viaScript) {
     const [file, args] = scriptCommand(shell, cmd, cols, rows);
     child = spawn(file, args, { cwd: root, env });
   } else {
@@ -649,6 +695,7 @@ function runShell(ws, url, { root, pty }) {
     if (isBinary) return child.stdin.write(data.subarray(1));
     const msg = JSON.parse(data.toString());
     if (msg.type === 'eof') child.stdin.end();
+    else if (msg.type === 'resize' && viaPython) child.stdio[3].write(`${msg.rows | 0} ${msg.cols | 0}\n`);
   });
   ws.on('close', () => !exited && child.kill());
 }

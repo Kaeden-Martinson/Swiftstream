@@ -4,6 +4,8 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+- Fixed: `swiftstream exec <name> -- sh -c 'echo start; ...'` lost its first command, because the arguments reached the server joined by spaces. Each argument now stays one word on the server. A single argument is still run as a command line, as with ssh (`exec prod -- 'cd /srv && git pull'`).
+
 ## [0.1.11] - 2026-11-04
 
 - Setup says why it couldn't continue. A server that accepts the login but won't run commands (often one that wants a new password on first login) no longer shows up as "Node.js isn't installed", and a failed Node.js install lists what was tried and what went wrong.

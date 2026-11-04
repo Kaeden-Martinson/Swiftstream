@@ -57,6 +57,8 @@ try {
 
   const exec = ok(clientHome, 'exec', 'local', '--', 'echo', 'hello-swiftstream');
   assert.match(exec, /hello-swiftstream/);
+  // Each argument stays one word on the server, so sh -c gets the whole script (Windows servers use cmd.exe).
+  if (process.platform !== 'win32') assert.equal(ok(clientHome, 'exec', 'local', '--', 'sh', '-c', 'echo start; echo second'), 'start\nsecond\n');
   console.log('ok  exec');
 
   const src = path.join(work, 'big.bin');

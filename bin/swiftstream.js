@@ -264,8 +264,11 @@ installs itself on the server, and saves it under --name (default: the host's sh
     summary: 'Run one command on a server',
     async run([name, ...cmd]) {
       need(name && cmd.length, this.usage);
+      // One argument is a command line, as with ssh. Several are quoted so each stays one word on the
+      // server (sh -c '...' keeps its whole script); * ? [ ] ~ are left for the remote shell to expand.
+      const quote = (a) => (/^[\w@%+=:,./~*?[\]-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
       await withClient(name, {}, async (conn) => {
-        process.exitCode = await openShell(conn, { cmd: cmd.join(' ') });
+        process.exitCode = await openShell(conn, { cmd: cmd.length === 1 ? cmd[0] : cmd.map(quote).join(' ') });
       });
     },
   },

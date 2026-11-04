@@ -339,6 +339,7 @@ api.term.onHello((id, { pty }) => {
   pane.pty = pty;
   pane.container.classList.remove('connecting');
   pane.xterm.reset();
+  if (pty) api.term.resize(id, pane.xterm.cols, pane.xterm.rows); // resizes while connecting went nowhere
   watchSearchResults(pane);
   if (!pty) {
     pane.xterm.options.convertEol = true;

@@ -81,6 +81,21 @@ function addPane(session) {
   xterm.loadAddon(fit);
   xterm.loadAddon(search);
   xterm.open(container);
+  // Ctrl/Cmd+click opens http(s) URLs in the system browser (main.js routes window.open there).
+  xterm.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = xterm.buffer.active.getLine(y - 1)?.translateToString(true) || '';
+      const links = [];
+      for (const m of line.matchAll(/https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}]/g)) {
+        links.push({
+          text: m[0],
+          range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } },
+          activate: (e, url) => (e.ctrlKey || e.metaKey) && window.open(url),
+        });
+      }
+      callback(links);
+    },
+  });
   container.append(
     el(
       'div',

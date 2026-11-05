@@ -4,6 +4,7 @@ What changed in each version. The release workflow copies a version's section in
 
 ## [Unreleased]
 
+- Fixed: terminals on servers without `node-pty` (the usual case for servers set up by the app) kept the size they opened with, so after resizing the window, splitting or changing the text size, programs drew past the edge and the output scrolled. The server now uses `python3` for the terminal when it's there, which follows resizes. The app also re-sends the size once a terminal connects, since changes made while it was connecting were lost.
 - Fixed: `swiftstream exec <name> -- sh -c 'echo start; ...'` lost its first command, because the arguments reached the server joined by spaces. Each argument now stays one word on the server. A single argument is still run as a command line, as with ssh (`exec prod -- 'cd /srv && git pull'`).
 
 ## [0.1.11] - 2026-11-04

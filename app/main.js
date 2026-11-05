@@ -864,7 +864,7 @@ function createWindow() {
     if (level === 'error' || level === 3) log.error('page error', { message: e.message ?? legacy[1], source: e.sourceId ?? legacy[3], line: e.lineNumber ?? legacy[2] });
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//.test(url)) shell.openExternal(url);
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
